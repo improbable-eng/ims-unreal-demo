@@ -130,13 +130,18 @@ void AShooterGameMode::DefaultTimer()
 	AShooterGameState* const MyGameState = Cast<AShooterGameState>(GameState);
 	if (MyGameState && MyGameState->RemainingTime > 0 && !MyGameState->bTimerPaused)
 	{
+		if (GetMatchState() == MatchState::WaitingToStart && GetNumPlayers() == 0)
+		{
+			return;
+		}
+
 		MyGameState->RemainingTime--;
 		
 		if (MyGameState->RemainingTime <= 0)
 		{
 			if (GetMatchState() == MatchState::WaitingPostMatch)
 			{
-				RestartGame();
+				ExitPlayersToMainMenu();
 			}
 			else if (GetMatchState() == MatchState::InProgress)
 			{
@@ -161,6 +166,11 @@ void AShooterGameMode::DefaultTimer()
 				StartMatch();
 			}
 		}
+	}
+	// if the match is over and all clients have been disconnected, exit the server
+	else if (GetMatchState() == MatchState::WaitingPostMatch && GetNumPlayers() == 0)
+	{
+		FGenericPlatformMisc::RequestExit(false);
 	}
 }
 
@@ -219,6 +229,18 @@ void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayl
 	{
 		UE_LOG(LogGameMode, Display, TEXT("Failed to set Payload to Ready state."));
 		FGenericPlatformMisc::RequestExit(false); // Shutdown server
+	}
+}
+
+void AShooterGameMode::ExitPlayersToMainMenu()
+{
+	// send the players back to the main menu
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		(*It)->ClientReturnToMainMenuWithTextReason(NSLOCTEXT("GameMessages", "MatchEnded", "The match has ended."));
+
+		AShooterPlayerController* ShooterPlayerController = Cast<AShooterPlayerController>(*It);
+		ShooterPlayerController->HandleReturnToMainMenu();
 	}
 }
 

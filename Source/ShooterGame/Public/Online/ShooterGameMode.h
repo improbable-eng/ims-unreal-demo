@@ -166,6 +166,9 @@ protected:
 	void OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response);
 	void TrySetPayloadToReady();
 
+	/** Send all clients back to the main menu */
+	void ExitPlayersToMainMenu();
+
 public:	
 
 	/** finish current match and lock players */

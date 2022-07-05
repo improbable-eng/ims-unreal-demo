@@ -780,7 +780,7 @@ void AShooterPlayerController::HandleReturnToMainMenu()
 	CleanupSessionOnReturnToMenu();
 }
 
-void AShooterPlayerController::ClientReturnToMainMenu_Implementation(const FString& InReturnReason)
+void AShooterPlayerController::ClientReturnToMainMenuWithTextReason_Implementation(const FText& ReturnReason)
 {		
 	const UWorld* World = GetWorld();
 	UShooterGameInstance* SGI = World != NULL ? Cast<UShooterGameInstance>(World->GetGameInstance()) : NULL;
@@ -792,7 +792,6 @@ void AShooterPlayerController::ClientReturnToMainMenu_Implementation(const FStri
 
 	if ( GetNetMode() == NM_Client )
 	{
-		const FText ReturnReason	= NSLOCTEXT( "NetworkErrors", "HostQuit", "The host has quit the match." );
 		const FText OKButton		= NSLOCTEXT( "DialogButtons", "OKAY", "OK" );
 
 		SGI->ShowMessageThenGotoState( ReturnReason, OKButton, FText::GetEmpty(), ShooterGameInstanceState::MainMenu );

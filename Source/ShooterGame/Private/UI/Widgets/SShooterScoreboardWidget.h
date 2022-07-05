@@ -160,7 +160,7 @@ protected:
 	FText GetMatchOutcomeText() const;
 
 	/** Get text for match-restart notification. */
-	FText GetMatchRestartText() const;
+	FText GetMatchEndText() const;
 
 	/** get attribute value for kills */
 	int32 GetAttributeValue_Kills(class AShooterPlayerState* PlayerState) const;
