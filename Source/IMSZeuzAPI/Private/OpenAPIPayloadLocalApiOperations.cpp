@@ -46,7 +46,7 @@ void OpenAPIPayloadLocalApi::GetPayloadV0Request::SetupHttpRequest(const FHttpRe
 		Writer->WriteObjectEnd();
 		Writer->Close();
 		HttpRequest->SetHeader(TEXT("Content-Type"), TEXT("application/json; charset=utf-8"));
-		HttpRequest->SetContentAsString(JsonBody);
+		//HttpRequest->SetContentAsString(JsonBody);
 	}
 	else if (Consumes.Contains(TEXT("multipart/form-data")))
 	{
