@@ -32,6 +32,14 @@ AShooterGameMode::AShooterGameMode(const FObjectInitializer& ObjectInitializer) 
 	bAllowBots = true;	
 	bNeedsBotCreation = true;
 	bUseSeamlessTravel = FParse::Param(FCommandLine::Get(), TEXT("NoSeamlessTravel")) ? false : true;
+
+	RetryLimitCount = 10;
+	RetryTimeoutRelativeSeconds = 5;
+
+	if (IsRunningOnZeuz())
+	{
+		SetupPayloadLocalAPI();
+	}
 }
 
 void AShooterGameMode::PostInitProperties()
@@ -71,6 +79,32 @@ void AShooterGameMode::SetAllowBots(bool bInAllowBots, int32 InMaxBots)
 TSubclassOf<AGameSession> AShooterGameMode::GetGameSessionClass() const
 {
 	return AShooterGameSession::StaticClass();
+}
+
+bool AShooterGameMode::IsRunningOnZeuz()
+{
+	return FParse::Param(FCommandLine::Get(), TEXT("zeuz"));
+}
+
+void AShooterGameMode::SetupPayloadLocalAPI()
+{
+	RetryPolicy = IMSZeuzAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
+	PayloadLocalAPI = MakeShared<IMSZeuzAPI::OpenAPIPayloadLocalApi>();
+	OnSetPayloadToReadyDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate::CreateUObject(this, &AShooterGameMode::OnSetPayloadToReadyComplete);
+
+	FString payloadApiDomain = FPlatformMisc::GetEnvironmentVariable(*FString("ORCHESTRATION_PAYLOAD_API"));
+
+	if (!payloadApiDomain.IsEmpty())
+	{
+		FString payloadApiUrl = "http://" + payloadApiDomain;
+		PayloadLocalAPI->SetURL(payloadApiUrl);
+
+		UE_LOG(LogGameMode, Display, TEXT("Payload Local API URL was set to '%s'"), *payloadApiUrl);
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Error, TEXT("No environment variable with key 'ORCHESTRATION_PAYLOAD_API' was found."));
+	}
 }
 
 void AShooterGameMode::PreInitializeComponents()
@@ -156,6 +190,35 @@ void AShooterGameMode::HandleMatchIsWaitingToStart()
 				MyGameState->RemainingTime = 0.0f;
 			}
 		}
+	}
+
+	if (IsRunningOnZeuz() && PayloadLocalAPI != NULL)
+	{
+		TrySetPayloadToReady();
+	}
+}
+
+void AShooterGameMode::TrySetPayloadToReady()
+{
+	IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Request Request;
+	Request.SetShouldRetry(RetryPolicy);
+
+	UE_LOG(LogGameMode, Display, TEXT("Attempting to set payload to Ready state..."));
+	PayloadLocalAPI->ReadyV0(Request, OnSetPayloadToReadyDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
+}
+
+void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response)
+{
+	if (Response.IsSuccessful())
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Successfully set Payload to Ready state."));
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Failed to set Payload to Ready state."));
+		FGenericPlatformMisc::RequestExit(false); // Shutdown server
 	}
 }
 
