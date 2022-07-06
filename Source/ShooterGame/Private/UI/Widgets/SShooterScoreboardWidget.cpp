@@ -162,7 +162,7 @@ void SShooterScoreboardWidget::StoreTalkingPlayerData(const FUniqueNetId& Player
 	}
 }
 
-FText SShooterScoreboardWidget::GetMatchRestartText() const
+FText SShooterScoreboardWidget::GetMatchEndText() const
 {
 	if (PCOwner.IsValid() && (PCOwner->GetWorld() != NULL ))
 	{
@@ -171,11 +171,11 @@ FText SShooterScoreboardWidget::GetMatchRestartText() const
 		{
 			if (GameState->RemainingTime > 0)
 			{
-				return FText::Format(LOCTEXT("MatchRestartTimeString", "New match begins in: {0}"), FText::AsNumber(GameState->RemainingTime));
+				return FText::Format(LOCTEXT("MatchEndTimeString", "Match ending in: {0}"), FText::AsNumber(GameState->RemainingTime));
 			}
 			else
 			{
-				return LOCTEXT("MatchRestartingString", "Starting new match...");
+				return LOCTEXT("MatchEndingString", "Match ending...");
 			}
 		}
 	}
@@ -252,7 +252,7 @@ void SShooterScoreboardWidget::UpdateScoreboardGrid()
 					.HAlign(HAlign_Center)
 					[
 						SNew(STextBlock)
-						.Text(this, &SShooterScoreboardWidget::GetMatchRestartText)
+						.Text(this, &SShooterScoreboardWidget::GetMatchEndText)
 						.TextStyle(FShooterStyle::Get(), "ShooterGame.MenuHeaderTextStyle")
 					]
 				]

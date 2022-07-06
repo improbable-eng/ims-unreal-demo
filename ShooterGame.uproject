@@ -13,6 +13,11 @@
 			"Name": "ShooterGameLoadingScreen",
 			"Type": "Runtime",
 			"LoadingPhase": "PreLoadingScreen"
+		},
+		{
+			"Name": "IMSZeuzAPI",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [

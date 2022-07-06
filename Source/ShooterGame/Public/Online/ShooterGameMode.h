@@ -4,6 +4,10 @@
 
 #include "OnlineIdentityInterface.h"
 #include "ShooterPlayerController.h"
+#include "HttpModule.h"
+#include "HttpManager.h"
+#include "OpenAPIPayloadLocalApi.h"
+#include "OpenAPIPayloadLocalApiOperations.h"
 #include "ShooterGameMode.generated.h"
 
 class AShooterAIController;
@@ -141,7 +145,29 @@ protected:
 	virtual bool IsSpawnpointPreferred(APlayerStart* SpawnPoint, AController* Player) const;
 
 	/** Returns game session class to use */
-	virtual TSubclassOf<AGameSession> GetGameSessionClass() const override;	
+	virtual TSubclassOf<AGameSession> GetGameSessionClass() const override;
+
+	/* Check for -zeuz flag to know that the server is running in IMS zeuz */
+	bool IsRunningOnZeuz();
+
+	/* Setup Payload local API */
+	void SetupPayloadLocalAPI();
+
+	/* Retry policy and configuration */
+	int RetryLimitCount;
+	int RetryTimeoutRelativeSeconds;
+	IMSZeuzAPI::HttpRetryParams RetryPolicy;
+
+	/* IMS Payload Local APIs */
+	TSharedPtr<IMSZeuzAPI::OpenAPIPayloadLocalApi> PayloadLocalAPI;
+
+	/* Set the Payload to Ready when the GameServer is ready to accept connections */
+	IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate OnSetPayloadToReadyDelegate;
+	void OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response);
+	void TrySetPayloadToReady();
+
+	/** Send all clients back to the main menu */
+	void ExitPlayersToMainMenu();
 
 public:	
 

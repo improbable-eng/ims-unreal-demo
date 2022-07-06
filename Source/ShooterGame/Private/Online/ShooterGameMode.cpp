@@ -32,6 +32,14 @@ AShooterGameMode::AShooterGameMode(const FObjectInitializer& ObjectInitializer) 
 	bAllowBots = true;	
 	bNeedsBotCreation = true;
 	bUseSeamlessTravel = FParse::Param(FCommandLine::Get(), TEXT("NoSeamlessTravel")) ? false : true;
+
+	RetryLimitCount = 10;
+	RetryTimeoutRelativeSeconds = 5;
+
+	if (IsRunningOnZeuz())
+	{
+		SetupPayloadLocalAPI();
+	}
 }
 
 void AShooterGameMode::PostInitProperties()
@@ -73,6 +81,32 @@ TSubclassOf<AGameSession> AShooterGameMode::GetGameSessionClass() const
 	return AShooterGameSession::StaticClass();
 }
 
+bool AShooterGameMode::IsRunningOnZeuz()
+{
+	return FParse::Param(FCommandLine::Get(), TEXT("zeuz"));
+}
+
+void AShooterGameMode::SetupPayloadLocalAPI()
+{
+	RetryPolicy = IMSZeuzAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
+	PayloadLocalAPI = MakeShared<IMSZeuzAPI::OpenAPIPayloadLocalApi>();
+	OnSetPayloadToReadyDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate::CreateUObject(this, &AShooterGameMode::OnSetPayloadToReadyComplete);
+
+	FString payloadApiDomain = FPlatformMisc::GetEnvironmentVariable(*FString("ORCHESTRATION_PAYLOAD_API"));
+
+	if (!payloadApiDomain.IsEmpty())
+	{
+		FString payloadApiUrl = "http://" + payloadApiDomain;
+		PayloadLocalAPI->SetURL(payloadApiUrl);
+
+		UE_LOG(LogGameMode, Display, TEXT("Payload Local API URL was set to '%s'"), *payloadApiUrl);
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Error, TEXT("No environment variable with key 'ORCHESTRATION_PAYLOAD_API' was found."));
+	}
+}
+
 void AShooterGameMode::PreInitializeComponents()
 {
 	Super::PreInitializeComponents();
@@ -96,13 +130,18 @@ void AShooterGameMode::DefaultTimer()
 	AShooterGameState* const MyGameState = Cast<AShooterGameState>(GameState);
 	if (MyGameState && MyGameState->RemainingTime > 0 && !MyGameState->bTimerPaused)
 	{
+		if (GetMatchState() == MatchState::WaitingToStart && GetNumPlayers() == 0)
+		{
+			return;
+		}
+
 		MyGameState->RemainingTime--;
 		
 		if (MyGameState->RemainingTime <= 0)
 		{
 			if (GetMatchState() == MatchState::WaitingPostMatch)
 			{
-				RestartGame();
+				ExitPlayersToMainMenu();
 			}
 			else if (GetMatchState() == MatchState::InProgress)
 			{
@@ -127,6 +166,11 @@ void AShooterGameMode::DefaultTimer()
 				StartMatch();
 			}
 		}
+	}
+	// if the match is over and all clients have been disconnected, exit the server
+	else if (GetMatchState() == MatchState::WaitingPostMatch && GetNumPlayers() == 0)
+	{
+		FGenericPlatformMisc::RequestExit(false);
 	}
 }
 
@@ -156,6 +200,47 @@ void AShooterGameMode::HandleMatchIsWaitingToStart()
 				MyGameState->RemainingTime = 0.0f;
 			}
 		}
+	}
+
+	if (IsRunningOnZeuz() && PayloadLocalAPI != NULL)
+	{
+		TrySetPayloadToReady();
+	}
+}
+
+void AShooterGameMode::TrySetPayloadToReady()
+{
+	IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Request Request;
+	Request.SetShouldRetry(RetryPolicy);
+
+	UE_LOG(LogGameMode, Display, TEXT("Attempting to set payload to Ready state..."));
+	PayloadLocalAPI->ReadyV0(Request, OnSetPayloadToReadyDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
+}
+
+void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response)
+{
+	if (Response.IsSuccessful())
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Successfully set Payload to Ready state."));
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Failed to set Payload to Ready state."));
+		FGenericPlatformMisc::RequestExit(false); // Shutdown server
+	}
+}
+
+void AShooterGameMode::ExitPlayersToMainMenu()
+{
+	// send the players back to the main menu
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		(*It)->ClientReturnToMainMenuWithTextReason(NSLOCTEXT("GameMessages", "MatchEnded", "The match has ended."));
+
+		AShooterPlayerController* ShooterPlayerController = Cast<AShooterPlayerController>(*It);
+		ShooterPlayerController->HandleReturnToMainMenu();
 	}
 }
 

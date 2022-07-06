@@ -20,7 +20,8 @@ public class ShooterGame : ModuleRules
 				"ShooterGame/Private/UI/Menu",
 				"ShooterGame/Private/UI/Style",
 				"ShooterGame/Private/UI/Widgets",
-            }
+				"ShooterGame/Private/Online",
+			}
 		);
 
         PublicDependencyModuleNames.AddRange(
@@ -50,7 +51,9 @@ public class ShooterGame : ModuleRules
 				"PakFile",
 				"RHI",
 				"PhysicsCore",
-				"GameplayCameras"
+				"GameplayCameras",
+				"Http",
+				"IMSZeuzAPI"
 			}
 		);
 
