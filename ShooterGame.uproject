@@ -18,6 +18,11 @@
 			"Name": "IMSZeuzAPI",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "IMSSessionManagerAPI",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
