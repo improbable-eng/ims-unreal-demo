@@ -8,6 +8,9 @@
 #include "OnlineGameActivityInterface.h"
 #include "Engine/GameInstance.h"
 #include "Engine/NetworkDelegates.h"
+#include "PlayFab.h"
+#include "Core/PlayFabError.h"
+#include "Core/PlayFabClientDataModels.h"
 #include "ShooterGameInstance.generated.h"
 
 class FVariantData;
@@ -98,6 +101,9 @@ public:
 #if WITH_EDITOR
 	virtual FGameInstancePIEResult StartPlayInEditorGameInstance(ULocalPlayer* LocalPlayer, const FGameInstancePIEParameters& Params) override;
 #endif	// WITH_EDITOR
+
+	/** PlayFab player authentication to get security token to pass to Session Manager */
+	void PlayerPlayFabLogin();
 
 	virtual void ReceivedNetworkEncryptionToken(const FString& EncryptionToken, const FOnEncryptionKeyResponse& Delegate) override;
 	virtual void ReceivedNetworkEncryptionAck(const FOnEncryptionKeyResponse& Delegate) override;
@@ -216,6 +222,16 @@ private:
 	UPROPERTY(config)
 	FString MainMenuMap;
 
+	UPROPERTY(config)
+	FString PlayFabTitleId;
+
+	UPROPERTY(config)
+	FString PlayFabCustomId;
+
+
+	/** Client API for PlayFab player authentication */
+	PlayFabClientPtr ClientAPI;
+	FString SessionTicket;
 
 	FName CurrentState;
 	FName PendingState;
@@ -386,7 +402,12 @@ private:
 	void HandleControllerPairingChanged(int GameUserIndex, FControllerPairingChangedUserInfo PreviousUserInfo, FControllerPairingChangedUserInfo NewUserInfo);
 
 	// Handle confirming the controller disconnected dialog.
-	FReply OnControllerReconnectConfirm();	
+	FReply OnControllerReconnectConfirm();
+
+	/* PlayFab Authentication */
+	void PlayerPlayFabLoginOnSuccess(const PlayFab::ClientModels::FLoginResult& Result);
+	void PlayerPlayFabLoginOnError(const PlayFab::FPlayFabCppError& ErrorResult);
+	void CheckPlayerIsLoggedIn();
 
 protected:
 	bool HandleOpenCommand(const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld);

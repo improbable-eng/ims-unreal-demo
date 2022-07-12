@@ -19,6 +19,7 @@
 #include "Online/ShooterGameSession.h"
 #include "Online/ShooterOnlineSessionClient.h"
 #include "OnlineSubsystemUtils.h"
+#include "Core/PlayFabClientAPI.h"
 #include "ShooterGameUserSettings.h"
 
 #if !defined(CONTROLLER_SWAPPING)
@@ -109,21 +110,7 @@ void UShooterGameInstance::Init()
 	LocalPlayerOnlineStatus.InsertDefaulted(0, MAX_LOCAL_PLAYERS);
 
 	// game requires the ability to ID users.
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	check(OnlineSub);
-	const IOnlineIdentityPtr IdentityInterface = OnlineSub->GetIdentityInterface();
-	check(IdentityInterface.IsValid());
-
- 	const IOnlineSessionPtr SessionInterface = OnlineSub->GetSessionInterface();
- 	check(SessionInterface.IsValid());
-
-	// bind any OSS delegates we needs to handle
-	for (int i = 0; i < MAX_LOCAL_PLAYERS; ++i)
-	{
-		IdentityInterface->AddOnLoginStatusChangedDelegate_Handle(i, FOnLoginStatusChangedDelegate::CreateUObject(this, &UShooterGameInstance::HandleUserLoginChanged));
-	}
-
-	IdentityInterface->AddOnControllerPairingChangedDelegate_Handle(FOnControllerPairingChangedDelegate::CreateUObject(this, &UShooterGameInstance::HandleControllerPairingChanged));
+	PlayerPlayFabLogin();
 
 	FCoreDelegates::ApplicationWillDeactivateDelegate.AddUObject(this, &UShooterGameInstance::HandleAppWillDeactivate);
 
@@ -140,28 +127,12 @@ void UShooterGameInstance::Init()
 	FCoreUObjectDelegates::PostDemoPlay.AddUObject(this, &UShooterGameInstance::OnPostDemoPlay);
 
 	bPendingEnableSplitscreen = false;
-
-	OnlineSub->AddOnConnectionStatusChangedDelegate_Handle( FOnConnectionStatusChangedDelegate::CreateUObject( this, &UShooterGameInstance::HandleNetworkConnectionStatusChanged ) );
-
-	if (SessionInterface.IsValid())
-	{
-		SessionInterface->AddOnSessionFailureDelegate_Handle( FOnSessionFailureDelegate::CreateUObject( this, &UShooterGameInstance::HandleSessionFailure ) );
-	}
 	
 	OnEndSessionCompleteDelegate = FOnEndSessionCompleteDelegate::CreateUObject(this, &UShooterGameInstance::OnEndSessionComplete);
 
 	// Register delegate for ticker callback
 	TickDelegate = FTickerDelegate::CreateUObject(this, &UShooterGameInstance::Tick);
 	TickDelegateHandle = FTicker::GetCoreTicker().AddTicker(TickDelegate);
-
-	// Register activities delegate callback
- 	OnGameActivityActivationRequestedDelegate = FOnGameActivityActivationRequestedDelegate::CreateUObject(this, &UShooterGameInstance::OnGameActivityActivationRequestComplete);
- 	
- 	const IOnlineGameActivityPtr ActivityInterface = OnlineSub->GetGameActivityInterface();
-	if (ActivityInterface.IsValid())
-	{
-		OnGameActivityActivationRequestedDelegateHandle = ActivityInterface->AddOnGameActivityActivationRequestedDelegate_Handle(OnGameActivityActivationRequestedDelegate);
-	}
 
 	// Initialize the debug key with a set value for AES256. This is not secure and for example purposes only.
 	DebugTestEncryptionKey.SetNum(32);
@@ -2081,6 +2052,52 @@ void UShooterGameInstance::BeginHostingQuickMatch()
 
 	// Travel to the specified match URL
 	GetWorld()->ServerTravel(GetQuickMatchUrl());	
+}
+
+void UShooterGameInstance::PlayerPlayFabLogin()
+{
+	GetMutableDefault<UPlayFabRuntimeSettings>()->TitleId = PlayFabTitleId;
+
+	ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
+
+	if (ClientAPI)
+	{
+		PlayFab::ClientModels::FLoginWithCustomIDRequest Request;
+		Request.CustomId = PlayFabCustomId;
+		Request.CreateAccount = true;
+
+		ClientAPI->LoginWithCustomID(Request,
+			PlayFab::UPlayFabClientAPI::FLoginWithCustomIDDelegate::CreateUObject(this, &UShooterGameInstance::PlayerPlayFabLoginOnSuccess),
+			PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &UShooterGameInstance::PlayerPlayFabLoginOnError)
+		);
+	}
+}
+
+void UShooterGameInstance::PlayerPlayFabLoginOnSuccess(const PlayFab::ClientModels::FLoginResult& Result)
+{
+	UE_LOG(LogOnlineIdentity, Log, TEXT("Successfully authenticated player with PlayFab."));
+	SessionTicket = Result.SessionTicket;
+}
+
+void UShooterGameInstance::PlayerPlayFabLoginOnError(const PlayFab::FPlayFabCppError& ErrorResult)
+{
+	UE_LOG(LogOnlineIdentity, Error, TEXT("Failed to authenticate player with PlayFab."));
+
+	AShooterPlayerController_Menu* const FirstPC = Cast<AShooterPlayerController_Menu>(UGameplayStatics::GetPlayerController(GetWorld(), 0));
+	if (FirstPC != nullptr)
+	{
+		FText ReturnReason = NSLOCTEXT("NetworkErrors", "PlayFabAuthenticationFailed", "Could not authenticate you. Make sure you are connected to the internet.");
+		FText OKButton = NSLOCTEXT("DialogButtons", "OKAY", "OK");
+		ShowMessageThenGoMain(ReturnReason, OKButton, FText::GetEmpty());
+	}
+}
+
+void UShooterGameInstance::CheckPlayerIsLoggedIn()
+{
+	if (SessionTicket.IsEmpty())
+	{
+		PlayerPlayFabLogin();
+	}
 }
 
 void UShooterGameInstance::ReceivedNetworkEncryptionToken(const FString& EncryptionToken, const FOnEncryptionKeyResponse& Delegate)
