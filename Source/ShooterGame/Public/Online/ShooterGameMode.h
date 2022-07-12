@@ -185,4 +185,11 @@ public:
 	UPROPERTY()
 	TArray<AShooterPickup*> LevelPickups;
 
+	static const int32 MIN_NUMBER_BOTS = 0;
+	static const int32 MAX_NUMBER_BOTS = 4;
+	static const int32 DEFAULT_NUMBER_BOTS = 0;
+
+	static const int32 MIN_NUMBER_PLAYERS = 2;
+	static const int32 MAX_NUMBER_PLAYERS = 10;
+	static const int32 DEFAULT_NUMBER_PLAYERS = 6;
 };

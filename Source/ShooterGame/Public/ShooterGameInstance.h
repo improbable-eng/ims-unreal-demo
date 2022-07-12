@@ -108,7 +108,7 @@ public:
 	virtual void ReceivedNetworkEncryptionToken(const FString& EncryptionToken, const FOnEncryptionKeyResponse& Delegate) override;
 	virtual void ReceivedNetworkEncryptionAck(const FOnEncryptionKeyResponse& Delegate) override;
 
-	bool HostGame(ULocalPlayer* LocalPlayer, const FString& GameType, const FString& InTravelURL);
+	bool HostGame(const int32 PlayersCount, const int32 BotsCount);
 	bool JoinSession(ULocalPlayer* LocalPlayer, int32 SessionIndexInSearchResults);
 	bool JoinSession(ULocalPlayer* LocalPlayer, const FOnlineSessionSearchResult& SearchResult);
 	void SetPendingInvite(const FShooterPendingInvite& InPendingInvite);
@@ -281,8 +281,8 @@ private:
 	FDelegateHandle OnStartSessionCompleteDelegateHandle;
 	FDelegateHandle OnEndSessionCompleteDelegateHandle;
 	FDelegateHandle OnDestroySessionCompleteDelegateHandle;
-	FDelegateHandle OnCreatePresenceSessionCompleteDelegateHandle;
 	FDelegateHandle OnGameActivityActivationRequestedDelegateHandle;
+	FDelegateHandle OnCreateSessionCompleteDelegateHandle;
 	
 	FOnGameActivityActivationRequestedDelegate OnGameActivityActivationRequestedDelegate;
 
@@ -336,20 +336,14 @@ private:
 	/** Callback which is intended to be called upon joining session */
 	void OnJoinSessionComplete(EOnJoinSessionCompleteResult::Type Result);
 
-	/** Callback which is intended to be called upon session creation */
-	void OnCreatePresenceSessionComplete(FName SessionName, bool bWasSuccessful);
-
-	/** Callback which is called after adding local users to a session */
-	void OnRegisterLocalPlayerComplete(const FUniqueNetId& PlayerId, EOnJoinSessionCompleteResult::Type Result);
-
-	/** Called after all the local players are registered */
-	void FinishSessionCreation(EOnJoinSessionCompleteResult::Type Result);
-
 	/** Callback which is called after adding local users to a session we're joining */
 	void OnRegisterJoiningLocalPlayerComplete(const FUniqueNetId& PlayerId, EOnJoinSessionCompleteResult::Type Result);
 
 	/** Called after all the local players are registered in a session we're joining */
 	void FinishJoinSession(EOnJoinSessionCompleteResult::Type Result);
+
+	/** Callback which is intended to be called upon IMS session creation */
+	void OnCreateSessionComplete(FString SessionAddress, bool bWasSuccessful);
 
 	/**
 	* Creates the message menu, clears other menus and sets the KingState to Message.

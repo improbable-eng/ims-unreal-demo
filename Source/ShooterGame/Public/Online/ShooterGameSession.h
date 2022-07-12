@@ -4,6 +4,9 @@
 
 #include "Online.h"
 #include "ShooterLeaderboards.h"
+#include "HttpModule.h"
+#include "OpenAPISessionManagerV0Api.h"
+#include "OpenAPISessionManagerV0ApiOperations.h"
 #include "ShooterGameSession.generated.h"
 
 struct FShooterGameSessionParams
@@ -35,8 +38,22 @@ class SHOOTERGAME_API AShooterGameSession : public AGameSession
 
 protected:
 
+	UPROPERTY(config)
+	FString IMSProjectId;
+
+	UPROPERTY(config)
+	FString IMSSessionType;
+
+	/* Retry policy and configuration */
+	int RetryLimitCount = 5;
+	int RetryTimeoutRelativeSeconds = 10;
+	IMSSessionManagerAPI::HttpRetryParams RetryPolicy;
+
+	/* Session Manager API interface */
+	TSharedPtr<IMSSessionManagerAPI::OpenAPISessionManagerV0Api> SessionManagerAPI;
+
 	/** Delegate for creating a new session */
-	FOnCreateSessionCompleteDelegate OnCreateSessionCompleteDelegate;
+	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FCreateSessionV0Delegate OnCreateSessionCompleteDelegate;
 	/** Delegate after starting a session */
 	FOnStartSessionCompleteDelegate OnStartSessionCompleteDelegate;
 	/** Delegate for destroying a session */
@@ -55,11 +72,8 @@ protected:
 
 	/**
 	 * Delegate fired when a session create request has completed
-	 *
-	 * @param SessionName the name of the session this callback is for
-	 * @param bWasSuccessful true if the async action completed without error, false if there was an error
 	 */
-	virtual void OnCreateSessionComplete(FName SessionName, bool bWasSuccessful);
+	void OnCreateSessionComplete(const IMSSessionManagerAPI::OpenAPISessionManagerV0Api::CreateSessionV0Response& Response);
 
 	/**
 	 * Delegate fired when a session start request has completed
@@ -117,20 +131,16 @@ protected:
 	 */
 	void OnNoMatchesAvailable();
 
-
 	/**
-	 * Called when this instance is starting up as a dedicated server
+	 * Create session config for create session request
 	 */
-	virtual void RegisterServer() override;
+	FString CreateSessionConfigJson(const int32 MaxNumPlayers, const int32 BotsCount);
 
-	/* 
-	 * Event triggered when a presence session is created
-	 *
-	 * @param SessionName name of session that was created
-	 * @param bWasSuccessful was the create successful
+	/*
+	 * Event triggered when a session is created
 	 */
-	DECLARE_EVENT_TwoParams(AShooterGameSession, FOnCreatePresenceSessionComplete, FName /*SessionName*/, bool /*bWasSuccessful*/);
-	FOnCreatePresenceSessionComplete CreatePresenceSessionCompleteEvent;
+	DECLARE_EVENT_TwoParams(AShooterGameSession, FOnCreateSessionIMSComplete, FString /*SessionAddress*/, bool /*bWasSuccessful*/);
+	FOnCreateSessionIMSComplete CreateSessionCompleteEvent;
 
 	/* 
 	 * Event triggered when a session is joined
@@ -157,26 +167,11 @@ public:
 	/**
 	 * Host a new online session
 	 *
-	 * @param UserId user that initiated the request
-	 * @param SessionName name of session 
-	 * @param bIsLAN is this going to hosted over LAN
-	 * @param bIsPresence is the session to create a presence session
 	 * @param MaxNumPlayers Maximum number of players to allow in the session
-	 *
-	 * @return bool true if successful, false otherwise
+	 * @param BotsCount Number of bots to spawn in the session
+	 * @param SessionTicket Ticket to authenticate session creation
 	 */
-	bool HostSession(TSharedPtr<const FUniqueNetId> UserId, FName SessionName, const FString& GameType, const FString& MapName, bool bIsLAN, bool bIsPresence, int32 MaxNumPlayers);
-
-	/**
-	 * Host a new online session with specified settings
-	 *
-	 * @param UserId user that initiated the request
-	 * @param SessionName name of session 
-	 * @param SessionSettings settings to create session with
-	 *
-	 * @return bool true if successful, false otherwise
-	 */
-	bool HostSession(const TSharedPtr<const FUniqueNetId> UserId, const FName SessionName, const FOnlineSessionSettings& SessionSettings);
+	void HostSession(const int32 MaxNumPlayers, const int32 BotsCount, const FString SessionTicket);
 
 	/**
 	 * Find an online session
@@ -229,8 +224,8 @@ public:
 	 */
 	const TArray<FOnlineSessionSearchResult> & GetSearchResults() const;
 
-	/** @return the delegate fired when creating a presence session */
-	FOnCreatePresenceSessionComplete& OnCreatePresenceSessionComplete() { return CreatePresenceSessionCompleteEvent; }
+	/** @return the delegate fired when creating a session */
+	FOnCreateSessionIMSComplete& OnCreateSessionComplete() { return CreateSessionCompleteEvent; }
 
 	/** @return the delegate fired when joining a session */
 	FOnJoinSessionComplete& OnJoinSessionComplete() { return JoinSessionCompleteEvent; }

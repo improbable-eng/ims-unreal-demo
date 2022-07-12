@@ -16,13 +16,16 @@ AShooterGameSession::AShooterGameSession(const FObjectInitializer& ObjectInitial
 {
 	if (!HasAnyFlags(RF_ClassDefaultObject))
 	{
-		OnCreateSessionCompleteDelegate = FOnCreateSessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnCreateSessionComplete);
+		OnCreateSessionCompleteDelegate = IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FCreateSessionV0Delegate::CreateUObject(this, &AShooterGameSession::OnCreateSessionComplete);
 		OnDestroySessionCompleteDelegate = FOnDestroySessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnDestroySessionComplete);
 
 		OnFindSessionsCompleteDelegate = FOnFindSessionsCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnFindSessionsComplete);
 		OnJoinSessionCompleteDelegate = FOnJoinSessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnJoinSessionComplete);
 
 		OnStartSessionCompleteDelegate = FOnStartSessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnStartOnlineGameComplete);
+
+		RetryPolicy = IMSSessionManagerAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
+		SessionManagerAPI = MakeShared<IMSSessionManagerAPI::OpenAPISessionManagerV0Api>();
 	}
 }
 
@@ -161,22 +164,33 @@ const TArray<FOnlineSessionSearchResult> & AShooterGameSession::GetSearchResults
 
 /**
  * Delegate fired when a session create request has completed
- *
- * @param SessionName the name of the session this callback is for
- * @param bWasSuccessful true if the async action completed without error, false if there was an error
  */
-void AShooterGameSession::OnCreateSessionComplete(FName InSessionName, bool bWasSuccessful)
+void AShooterGameSession::OnCreateSessionComplete(const IMSSessionManagerAPI::OpenAPISessionManagerV0Api::CreateSessionV0Response& Response)
 {
-	UE_LOG(LogOnlineGame, Verbose, TEXT("OnCreateSessionComplete %s bSuccess: %d"), *InSessionName.ToString(), bWasSuccessful);
-
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
+	if (Response.IsSuccessful() && Response.Content.Address.IsSet() && Response.Content.Ports.IsSet())
 	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		Sessions->ClearOnCreateSessionCompleteDelegate_Handle(OnCreateSessionCompleteDelegateHandle);
-	}
+		FString IP = Response.Content.Address.GetValue();
+		// Filtering the ports in the response for the "GamePort", this value should match what you have indicated in your allocation
+		const IMSSessionManagerAPI::OpenAPIV0Port* GamePortResponse = Response.Content.Ports.GetValue().FindByPredicate([](IMSSessionManagerAPI::OpenAPIV0Port PortResponse) { return PortResponse.Name == "GamePort"; });
 
-	OnCreatePresenceSessionComplete().Broadcast(InSessionName, bWasSuccessful);	
+		if (GamePortResponse != nullptr)
+		{
+			FString SessionAddress = IP + ":" + FString::FromInt(GamePortResponse->Port);
+
+			UE_LOG(LogOnlineGame, Display, TEXT("Successfully created a session. Connect to session address: '%s'"), *SessionAddress);
+			OnCreateSessionComplete().Broadcast(SessionAddress, true);
+		}
+		else
+		{
+			UE_LOG(LogOnlineGame, Error, TEXT("Successfully created a session but could not find the Game Port."));
+			OnCreateSessionComplete().Broadcast("", false);
+		}
+	}
+	else
+	{
+		UE_LOG(LogOnlineGame, Display, TEXT("Failed to create a session."));
+		OnCreateSessionComplete().Broadcast("", false);
+	}
 }
 
 /**
@@ -198,87 +212,24 @@ void AShooterGameSession::OnDestroySessionComplete(FName InSessionName, bool bWa
 	}
 }
 
-bool AShooterGameSession::HostSession(TSharedPtr<const FUniqueNetId> UserId, FName InSessionName, const FString& GameType, const FString& MapName, bool bIsLAN, bool bIsPresence, int32 MaxNumPlayers)
+void AShooterGameSession::HostSession(const int32 MaxNumPlayers, const int32 BotsCount, const FString SessionTicket)
 {
-	IOnlineSubsystem* const OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		CurrentSessionParams.SessionName = InSessionName;
-		CurrentSessionParams.bIsLAN = bIsLAN;
-		CurrentSessionParams.bIsPresence = bIsPresence;
-		CurrentSessionParams.UserId = UserId;
-		MaxPlayers = MaxNumPlayers;
+	// See the following doc for more information https://docs.ims.improbable.io/docs/ims-session-manager/guides/authetication
+	SessionManagerAPI->AddHeaderParam("Authorization", "Bearer playfab/" + SessionTicket);
 
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid() && CurrentSessionParams.UserId.IsValid())
-		{
-			HostSettings = MakeShareable(new FShooterOnlineSessionSettings(bIsLAN, bIsPresence, MaxPlayers));
-			HostSettings->bUseLobbiesIfAvailable = true;
-			HostSettings->bUseLobbiesVoiceChatIfAvailable = true;
-			HostSettings->Set(SETTING_GAMEMODE, GameType, EOnlineDataAdvertisementType::ViaOnlineService);
-			HostSettings->Set(SETTING_MAPNAME, MapName, EOnlineDataAdvertisementType::ViaOnlineService);
-			HostSettings->Set(SETTING_MATCHING_HOPPER, FString("TeamDeathmatch"), EOnlineDataAdvertisementType::DontAdvertise);
-			HostSettings->Set(SETTING_MATCHING_TIMEOUT, 120.0f, EOnlineDataAdvertisementType::ViaOnlineService);
-			HostSettings->Set(SETTING_SESSION_TEMPLATE_NAME, FString("GameSession"), EOnlineDataAdvertisementType::DontAdvertise);
-			if (UserId->IsValid())
-			{
-				FSessionSettings & UserSettings =  HostSettings->MemberSettings.Add(UserId.ToSharedRef(), FSessionSettings());			
-				UserSettings.Add(SETTING_GAMEMODE, FOnlineSessionSetting(FString("GameSession"), EOnlineDataAdvertisementType::ViaOnlineService));
-			}
+	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::CreateSessionV0Request Request;
+	Request.SetShouldRetry(RetryPolicy);
+	Request.ProjectId = IMSProjectId;
+	Request.SessionType = IMSSessionType;
 
-			// On Switch, we don't have room for this in the LAN session data (and it's not used anyway when searching), so there's no need to add it.
-			// Can be readded if the buffer size increases.
-			if (!(PLATFORM_SWITCH && bIsLAN))
-			{
-				HostSettings->Set(SEARCH_KEYWORDS, CustomMatchKeyword, EOnlineDataAdvertisementType::ViaOnlineService);
-			}
+	IMSSessionManagerAPI::OpenAPIV0CreateSessionRequestBody RequestBody;
+	RequestBody.SessionConfig = CreateSessionConfigJson(MaxNumPlayers, BotsCount);
+	Request.Body = RequestBody;
 
-			OnCreateSessionCompleteDelegateHandle = Sessions->AddOnCreateSessionCompleteDelegate_Handle(OnCreateSessionCompleteDelegate);
-			return Sessions->CreateSession(*CurrentSessionParams.UserId, CurrentSessionParams.SessionName, *HostSettings);
-		}
-		else
-		{
-			OnCreateSessionComplete(InSessionName, false);
-		}
-	}
-#if !UE_BUILD_SHIPPING
-	else 
-	{
-		// Hack workflow in development
-		OnCreatePresenceSessionComplete().Broadcast(NAME_GameSession, true);
-		return true;
-	}
-#endif
+	UE_LOG(LogOnlineGame, Display, TEXT("Attempting to create a session..."));
+	SessionManagerAPI->CreateSessionV0(Request, OnCreateSessionCompleteDelegate);
 
-	return false;
-}
-
-bool AShooterGameSession::HostSession(const TSharedPtr<const FUniqueNetId> UserId, const FName InSessionName, const FOnlineSessionSettings& SessionSettings)
-{
-	bool bResult = false;
-
-	IOnlineSubsystem* const OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		CurrentSessionParams.SessionName = InSessionName;
-		CurrentSessionParams.bIsLAN = SessionSettings.bIsLANMatch;
-		CurrentSessionParams.bIsPresence = SessionSettings.bUsesPresence;
-		CurrentSessionParams.UserId = UserId;
-		MaxPlayers = SessionSettings.NumPrivateConnections + SessionSettings.NumPublicConnections;
-
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid() && CurrentSessionParams.UserId.IsValid())
-		{
-			OnCreateSessionCompleteDelegateHandle = Sessions->AddOnCreateSessionCompleteDelegate_Handle(OnCreateSessionCompleteDelegate);
-			bResult = Sessions->CreateSession(*UserId, InSessionName, SessionSettings);
-		}
-		else
-		{
-			OnCreateSessionComplete(InSessionName, false);
-		}
-	}
-
-	return bResult;
+	FHttpModule::Get().GetHttpManager().Flush(false);
 }
 
 void AShooterGameSession::OnFindSessionsComplete(bool bWasSuccessful)
@@ -355,6 +306,20 @@ void AShooterGameSession::OnNoMatchesAvailable()
 {
 	UE_LOG(LogOnlineGame, Verbose, TEXT("Matchmaking complete, no sessions available."));
 	SearchSettings = NULL;
+}
+
+FString AShooterGameSession::CreateSessionConfigJson(const int32 MaxNumPlayers, const int32 BotsCount)
+{
+	UE_LOG(LogOnlineGame, Log, TEXT("Creating Session Config Json: MaxNumPlayers = %d, BotsCount = %d"), MaxNumPlayers, BotsCount);
+	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+	JsonObject->SetNumberField("MaxNumPlayers", MaxNumPlayers);
+	JsonObject->SetNumberField("BotsCount", BotsCount);
+
+	FString SessionConfig;
+	TSharedRef< TJsonWriter<> > Writer = TJsonWriterFactory<>::Create(&SessionConfig);
+	FJsonSerializer::Serialize(JsonObject.ToSharedRef(), Writer);
+
+	return SessionConfig;
 }
 
 void AShooterGameSession::FindSessions(TSharedPtr<const FUniqueNetId> UserId, FName InSessionName, bool bIsLAN, bool bIsPresence)
@@ -475,32 +440,4 @@ bool AShooterGameSession::TravelToSession(int32 ControllerId, FName InSessionNam
 #endif //!UE_BUILD_SHIPPING
 
 	return false;
-}
-
-void AShooterGameSession::RegisterServer()
-{
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		IOnlineSessionPtr SessionInt = OnlineSub->GetSessionInterface();
-		if (SessionInt.IsValid())
-		{
-			TSharedPtr<class FShooterOnlineSessionSettings> ShooterHostSettings = MakeShareable(new FShooterOnlineSessionSettings(false, false, 16));
-			ShooterHostSettings->Set(SETTING_MATCHING_HOPPER, FString("TeamDeathmatch"), EOnlineDataAdvertisementType::DontAdvertise);
-			ShooterHostSettings->Set(SETTING_MATCHING_TIMEOUT, 120.0f, EOnlineDataAdvertisementType::ViaOnlineService);
-			ShooterHostSettings->Set(SETTING_SESSION_TEMPLATE_NAME, FString("GameSession"), EOnlineDataAdvertisementType::DontAdvertise);
-			ShooterHostSettings->Set(SETTING_GAMEMODE, FString("TeamDeathmatch"), EOnlineDataAdvertisementType::ViaOnlineService);
-			ShooterHostSettings->Set(SETTING_MAPNAME, GetWorld()->GetMapName(), EOnlineDataAdvertisementType::ViaOnlineService);
-			ShooterHostSettings->bAllowInvites = true;
-			ShooterHostSettings->bIsDedicated = true;
-			if (FParse::Param(FCommandLine::Get(), TEXT("forcelan")))
-			{
-				UE_LOG(LogOnlineGame, Log, TEXT("Registering server as a LAN server"));
-				ShooterHostSettings->bIsLANMatch = true;
-			}
-			HostSettings = ShooterHostSettings;
-			OnCreateSessionCompleteDelegateHandle = SessionInt->AddOnCreateSessionCompleteDelegate_Handle(OnCreateSessionCompleteDelegate);
-			SessionInt->CreateSession(0, NAME_GameSession, *HostSettings);
-		}
-	}
 }

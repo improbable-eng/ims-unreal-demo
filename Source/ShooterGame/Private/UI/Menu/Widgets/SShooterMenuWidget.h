@@ -363,17 +363,8 @@ namespace MenuHelper
 	FORCEINLINE void PlaySoundAndCall(UWorld* World, const FSlateSound& Sound, int32 UserIndex, UserClass* inObj, typename FShooterMenuItem::FOnConfirmMenuItem::TSPMethodDelegate< UserClass >::FMethodPtr inMethod)
 	{
 		FSlateApplication::Get().PlaySound(Sound, UserIndex);
-		if (World)
-		{
-			const float SoundDuration = FMath::Max(FSlateApplication::Get().GetSoundDuration(Sound), 0.1f);
-			FTimerHandle DummyHandle;
-			World->GetTimerManager().SetTimer(DummyHandle, FTimerDelegate::CreateSP(inObj, inMethod), SoundDuration, false);
-		}
-		else
-		{
-			FTimerDelegate D = FTimerDelegate::CreateSP(inObj, inMethod);
-			D.ExecuteIfBound();
-		}
+		FTimerDelegate D = FTimerDelegate::CreateSP(inObj, inMethod);
+		D.ExecuteIfBound();
 	}
 
 }

@@ -92,6 +92,13 @@ public:
 		return BotsCount;
 	}
 
+	FORCEINLINE int32 GetPlayersCount() const
+	{
+		return PlayersCount;
+	}
+
+	void SetPlayersCount(int32 InCount);
+
 	void SetBotsCount(int32 InCount);
 
 	FORCEINLINE bool IsRecordingDemos() const
@@ -141,6 +148,10 @@ protected:
 	/** Lifetime count of rockets fired */
 	UPROPERTY()
 	int32 RocketsFired;
+
+	/** how many players can join the hosted game */
+	UPROPERTY()
+	int32 PlayersCount;
 
 	/** how many bots join hosted game */
 	UPROPERTY()

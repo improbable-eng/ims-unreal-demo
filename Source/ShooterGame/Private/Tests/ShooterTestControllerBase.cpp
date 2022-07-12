@@ -265,10 +265,7 @@ void UShooterTestControllerBase::HostGame()
 
 	if (PlayerOwner)
 	{
-		const FString GameType = TEXT("FFA");
-		const FString StartURL = FString::Printf(TEXT("/Game/Maps/%s?game=%s%s"), TEXT("Highrise"), *GameType, TEXT("?listen"));
-
-		GameInstance->HostGame(PlayerOwner, GameType, StartURL);
+		GameInstance->HostGame(10, 2);
 	}
 	else
 	{

@@ -172,7 +172,10 @@ protected:
 	void OnMatchmakingComplete(FName SessionName, const FOnlineError& ErrorDetails, const FSessionMatchmakingResults& Results);
 
 	/** bot count option changed callback */
-	void BotCountOptionChanged(TSharedPtr<FShooterMenuItem> MenuItem, int32 MultiOptionIndex);			
+	void BotCountOptionChanged(TSharedPtr<FShooterMenuItem> MenuItem, int32 MultiOptionIndex);
+
+	/** player count option changed callback */
+	void PlayerCountOptionChanged(TSharedPtr<FShooterMenuItem> MenuItem, int32 MultiOptionIndex);
 
 	/** lan match option changed callback */
 	void LanMatchChanged(TSharedPtr<FShooterMenuItem> MenuItem, int32 MultiOptionIndex);
@@ -183,20 +186,11 @@ protected:
 	/** record demo option changed callback */
 	void RecordDemoChanged(TSharedPtr<FShooterMenuItem> MenuItem, int32 MultiOptionIndex);
 
-	/** Plays StartGameSound sound and calls HostFreeForAll after sound is played */
-	void OnUIHostFreeForAll();
-
-	/** Plays StartGameSound sound and calls HostTeamDeathMatch after sound is played */
-	void OnUIHostTeamDeathMatch();
+	/** Plays StartGameSound sound and calls Host after sound is played */
+	void OnUIHost();
 
 	/** Hosts a game, using the passed in game type */
-	void HostGame(const FString& GameType);
-
-	/** Hosts free for all game */
-	void HostFreeForAll();
-
-	/** Hosts team deathmatch game */
-	void HostTeamDeathMatch();
+	void HostGame();
 
 	/** General ok/cancel handler, that simply closes the dialog */
 	FReply OnConfirm();
@@ -293,6 +287,9 @@ protected:
 
 	/** number of bots in game */
 	int32 BotsCountOpt;
+
+	/** number of players in game */
+	int32 PlayersCountOpt;
 
 	/** Length that the UI for searching for a quickmatch should animate */
 	float QuickMAnimTimer;
