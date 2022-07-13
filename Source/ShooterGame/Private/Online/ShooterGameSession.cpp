@@ -17,120 +17,12 @@ AShooterGameSession::AShooterGameSession(const FObjectInitializer& ObjectInitial
 	if (!HasAnyFlags(RF_ClassDefaultObject))
 	{
 		OnCreateSessionCompleteDelegate = IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FCreateSessionV0Delegate::CreateUObject(this, &AShooterGameSession::OnCreateSessionComplete);
-		OnDestroySessionCompleteDelegate = FOnDestroySessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnDestroySessionComplete);
-
 		OnFindSessionsCompleteDelegate = IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FListSessionsV0Delegate::CreateUObject(this, &AShooterGameSession::OnFindSessionsComplete);
-
-		OnStartSessionCompleteDelegate = FOnStartSessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnStartOnlineGameComplete);
 
 		RetryPolicy = IMSSessionManagerAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
 		SessionManagerAPI = MakeShared<IMSSessionManagerAPI::OpenAPISessionManagerV0Api>();
 		CurrentSessionSearch = MakeShared<class SessionSearch>();
 	}
-}
-
-/**
- * Delegate fired when a session start request has completed
- *
- * @param SessionName the name of the session this callback is for
- * @param bWasSuccessful true if the async action completed without error, false if there was an error
- */
-void AShooterGameSession::OnStartOnlineGameComplete(FName InSessionName, bool bWasSuccessful)
-{
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid())
-		{
-			Sessions->ClearOnStartSessionCompleteDelegate_Handle(OnStartSessionCompleteDelegateHandle);
-		}
-	}
-
-	if (bWasSuccessful)
-	{
-		// tell non-local players to start online game
-		for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
-		{
-			AShooterPlayerController* PC = Cast<AShooterPlayerController>(*It);
-			if (PC && !PC->IsLocalPlayerController())
-			{
-				PC->ClientStartOnlineGame();
-			}
-		}
-	}
-}
-
-/** Handle starting the match */
-void AShooterGameSession::HandleMatchHasStarted()
-{
-	// start online game locally and wait for completion
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid() && (Sessions->GetNamedSession(NAME_GameSession) != nullptr))
-		{
-			UE_LOG(LogOnlineGame, Log, TEXT("Starting session %s on server"), *FName(NAME_GameSession).ToString());
-			OnStartSessionCompleteDelegateHandle = Sessions->AddOnStartSessionCompleteDelegate_Handle(OnStartSessionCompleteDelegate);
-			Sessions->StartSession(NAME_GameSession);
-		}
-	}
-}
-
-/** 
- * Ends a game session 
- *
- */
-void AShooterGameSession::HandleMatchHasEnded()
-{
-	// end online game locally 
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid() && (Sessions->GetNamedSession(NAME_GameSession) != nullptr))
-		{
-			// tell the clients to end
-			for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
-			{
-				AShooterPlayerController* PC = Cast<AShooterPlayerController>(*It);
-				if (PC && !PC->IsLocalPlayerController())
-				{
-					PC->ClientEndOnlineGame();
-				}
-			}
-
-			// server is handled here
-			UE_LOG(LogOnlineGame, Log, TEXT("Ending session %s on server"), *FName(NAME_GameSession).ToString() );
-			Sessions->EndSession(NAME_GameSession);
-		}
-	}
-}
-
-bool AShooterGameSession::IsBusy() const
-{ 
-	if (HostSettings.IsValid() || SearchSettings.IsValid())
-	{
-		return true;
-	}
-
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid())
-		{
-			EOnlineSessionState::Type GameSessionState = Sessions->GetSessionState(NAME_GameSession);
-			EOnlineSessionState::Type PartySessionState = Sessions->GetSessionState(NAME_PartySession);
-			if (GameSessionState != EOnlineSessionState::NoSession || PartySessionState != EOnlineSessionState::NoSession)
-			{
-				return true;
-			}
-		}
-	}
-
-	return false;
 }
 
 /**
@@ -161,25 +53,6 @@ void AShooterGameSession::OnCreateSessionComplete(const IMSSessionManagerAPI::Op
 	{
 		UE_LOG(LogOnlineGame, Display, TEXT("Failed to create a session."));
 		OnCreateSessionComplete().Broadcast("", false);
-	}
-}
-
-/**
- * Delegate fired when a destroying an online session has completed
- *
- * @param SessionName the name of the session this callback is for
- * @param bWasSuccessful true if the async action completed without error, false if there was an error
- */
-void AShooterGameSession::OnDestroySessionComplete(FName InSessionName, bool bWasSuccessful)
-{
-	UE_LOG(LogOnlineGame, Verbose, TEXT("OnDestroySessionComplete %s bSuccess: %d"), *InSessionName.ToString(), bWasSuccessful);
-
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		Sessions->ClearOnDestroySessionCompleteDelegate_Handle(OnDestroySessionCompleteDelegateHandle);
-		HostSettings = NULL;
 	}
 }
 
@@ -230,58 +103,6 @@ void AShooterGameSession::OnFindSessionsComplete(const IMSSessionManagerAPI::Ope
 		CurrentSessionSearch->SearchState = SearchState::Failed;
 		OnFindSessionsComplete().Broadcast(false);
 	}
-}
-
-void AShooterGameSession::ResetBestSessionVars()
-{
-	CurrentSessionParams.BestSessionIdx = -1;
-}
-
-void AShooterGameSession::ChooseBestSession()
-{
-	// Start searching from where we left off
-	for (int32 SessionIndex = CurrentSessionParams.BestSessionIdx+1; SessionIndex < SearchSettings->SearchResults.Num(); SessionIndex++)
-	{
-		// Found the match that we want
-		CurrentSessionParams.BestSessionIdx = SessionIndex;
-		return;
-	}
-
-	CurrentSessionParams.BestSessionIdx = -1;
-}
-
-void AShooterGameSession::StartMatchmaking()
-{
-	ResetBestSessionVars();
-	ContinueMatchmaking();
-}
-
-void AShooterGameSession::ContinueMatchmaking()
-{	
-	ChooseBestSession();
-	if (CurrentSessionParams.BestSessionIdx >= 0 && CurrentSessionParams.BestSessionIdx < SearchSettings->SearchResults.Num())
-	{
-		IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-		if (OnlineSub)
-		{
-			IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-			if (Sessions.IsValid() && CurrentSessionParams.UserId.IsValid())
-			{
-				//OnJoinSessionCompleteDelegateHandle = Sessions->AddOnJoinSessionCompleteDelegate_Handle(OnJoinSessionCompleteDelegate);
-				//Sessions->JoinSession(*CurrentSessionParams.UserId, CurrentSessionParams.SessionName, SearchSettings->SearchResults[CurrentSessionParams.BestSessionIdx]);
-			}
-		}
-	}
-	else
-	{
-		OnNoMatchesAvailable();
-	}
-}
-
-void AShooterGameSession::OnNoMatchesAvailable()
-{
-	UE_LOG(LogOnlineGame, Verbose, TEXT("Matchmaking complete, no sessions available."));
-	SearchSettings = NULL;
 }
 
 FString AShooterGameSession::CreateSessionConfigJson(const int32 MaxNumPlayers, const int32 BotsCount)

@@ -10,27 +10,6 @@
 #include "SessionSearch.h"
 #include "ShooterGameSession.generated.h"
 
-struct FShooterGameSessionParams
-{
-	/** Name of session settings are stored with */
-	FName SessionName;
-	/** LAN Match */
-	bool bIsLAN;
-	/** Presence enabled session */
-	bool bIsPresence;
-	/** Id of player initiating lobby */
-	TSharedPtr<const FUniqueNetId> UserId;
-	/** Current search result choice to join */
-	int32 BestSessionIdx;
-
-	FShooterGameSessionParams()
-		: SessionName(NAME_None)
-		, bIsLAN(false)
-		, bIsPresence(false)
-		, BestSessionIdx(0)
-	{
-	}
-};
 
 UCLASS(config=Game)
 class SHOOTERGAME_API AShooterGameSession : public AGameSession
@@ -58,21 +37,10 @@ protected:
 
 	/** Delegate for creating a new session */
 	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FCreateSessionV0Delegate OnCreateSessionCompleteDelegate;
-	/** Delegate after starting a session */
-	FOnStartSessionCompleteDelegate OnStartSessionCompleteDelegate;
-	/** Delegate for destroying a session */
-	FOnDestroySessionCompleteDelegate OnDestroySessionCompleteDelegate;
 	/** Delegate for searching for sessions */
 	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FListSessionsV0Delegate OnFindSessionsCompleteDelegate;
 	/** Delegate after joining a session */
 	FOnJoinSessionCompleteDelegate OnJoinSessionCompleteDelegate;
-
-	/** Transient properties of a session during game creation/matchmaking */
-	FShooterGameSessionParams CurrentSessionParams;
-	/** Current host settings */
-	TSharedPtr<class FShooterOnlineSessionSettings> HostSettings;
-	/** Current search settings */
-	TSharedPtr<class FShooterOnlineSearchSettings> SearchSettings;
 
 	/**
 	 * Delegate fired when a session create request has completed
@@ -80,52 +48,11 @@ protected:
 	void OnCreateSessionComplete(const IMSSessionManagerAPI::OpenAPISessionManagerV0Api::CreateSessionV0Response& Response);
 
 	/**
-	 * Delegate fired when a session start request has completed
-	 *
-	 * @param SessionName the name of the session this callback is for
-	 * @param bWasSuccessful true if the async action completed without error, false if there was an error
-	 */
-	void OnStartOnlineGameComplete(FName SessionName, bool bWasSuccessful);
-
-	/**
 	 * Delegate fired when a session search query has completed
 	 *
 	 * @param bWasSuccessful true if the async action completed without error, false if there was an error
 	 */
 	void OnFindSessionsComplete(const IMSSessionManagerAPI::OpenAPISessionManagerV0Api::ListSessionsV0Response& Response);
-
-	/**
-	 * Delegate fired when a destroying an online session has completed
-	 *
-	 * @param SessionName the name of the session this callback is for
-	 * @param bWasSuccessful true if the async action completed without error, false if there was an error
-	 */
-	virtual void OnDestroySessionComplete(FName SessionName, bool bWasSuccessful);	
-
-	/**
-	 * Reset the variables the are keeping track of session join attempts
-	 */
-	void ResetBestSessionVars();
-
-	/**
-	 * Choose the best session from a list of search results based on game criteria
-	 */
-	void ChooseBestSession();
-
-	/**
-	 * Entry point for matchmaking after search results are returned
-	 */
-	void StartMatchmaking();
-
-	/**
-	 * Return point after each attempt to join a search result
-	 */
-	void ContinueMatchmaking();
-
-	/**
-	 * Delegate triggered when no more search results are available
-	 */
-	void OnNoMatchesAvailable();
 
 	/**
 	 * Create session config for create session request
@@ -154,9 +81,6 @@ protected:
 	FOnFindSessionsComplete FindSessionsCompleteEvent;
 
 public:
-
-	/** Default number of players allowed in a game */
-	static const int32 DEFAULT_NUM_PLAYERS = 8;
 
 	/**
 	 * Host a new online session
@@ -195,9 +119,6 @@ public:
 	 */
 	bool JoinSession(FString SessionAddress);
 
-	/** @return true if any online async work is in progress, false otherwise */
-	bool IsBusy() const;
-
 	const SearchState GetSearchSessionsStatus() const;
 	const TArray<Session>& GetSearchResults() const;
 
@@ -210,24 +131,11 @@ public:
 	/** @return the delegate fired when search of session completes */
 	FOnFindSessionsComplete& OnFindSessionsComplete() { return FindSessionsCompleteEvent; }
 
-	/** Handle starting the match */
-	virtual void HandleMatchHasStarted() override;
-
-	/** Handles when the match has ended */
-	virtual void HandleMatchHasEnded() override;
-
 	/**
 	 * Travel to a session address (as client) for a given session
 	 *
 	 * @return true if successful, false otherwise
 	 */
 	bool TravelToSession(FString SessionAddress);
-
-	/** Handles to various registered delegates */
-	FDelegateHandle OnStartSessionCompleteDelegateHandle;
-	FDelegateHandle OnCreateSessionCompleteDelegateHandle;
-	FDelegateHandle OnDestroySessionCompleteDelegateHandle;
-	FDelegateHandle OnFindSessionsCompleteDelegateHandle;
-	FDelegateHandle OnJoinSessionCompleteDelegateHandle;
 };
 
