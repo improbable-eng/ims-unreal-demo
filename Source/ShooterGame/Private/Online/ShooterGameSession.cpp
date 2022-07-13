@@ -20,7 +20,6 @@ AShooterGameSession::AShooterGameSession(const FObjectInitializer& ObjectInitial
 		OnDestroySessionCompleteDelegate = FOnDestroySessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnDestroySessionComplete);
 
 		OnFindSessionsCompleteDelegate = IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FListSessionsV0Delegate::CreateUObject(this, &AShooterGameSession::OnFindSessionsComplete);
-		OnJoinSessionCompleteDelegate = FOnJoinSessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnJoinSessionComplete);
 
 		OnStartSessionCompleteDelegate = FOnStartSessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnStartOnlineGameComplete);
 
@@ -268,8 +267,8 @@ void AShooterGameSession::ContinueMatchmaking()
 			IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
 			if (Sessions.IsValid() && CurrentSessionParams.UserId.IsValid())
 			{
-				OnJoinSessionCompleteDelegateHandle = Sessions->AddOnJoinSessionCompleteDelegate_Handle(OnJoinSessionCompleteDelegate);
-				Sessions->JoinSession(*CurrentSessionParams.UserId, CurrentSessionParams.SessionName, SearchSettings->SearchResults[CurrentSessionParams.BestSessionIdx]);
+				//OnJoinSessionCompleteDelegateHandle = Sessions->AddOnJoinSessionCompleteDelegate_Handle(OnJoinSessionCompleteDelegate);
+				//Sessions->JoinSession(*CurrentSessionParams.UserId, CurrentSessionParams.SessionName, SearchSettings->SearchResults[CurrentSessionParams.BestSessionIdx]);
 			}
 		}
 	}
@@ -326,94 +325,48 @@ void AShooterGameSession::FindSessions(FString SessionTicket)
 	FHttpModule::Get().GetHttpManager().Flush(false);
 }
 
-bool AShooterGameSession::JoinSession(TSharedPtr<const FUniqueNetId> UserId, FName InSessionName, int32 SessionIndexInSearchResults)
+bool AShooterGameSession::JoinSession(int32 SessionIndexInSearchResults)
 {
-	bool bResult = false;
+	UE_LOG(LogOnlineGame, Display, TEXT("Attempting to join session..."));
 
-	if (SessionIndexInSearchResults >= 0 && SessionIndexInSearchResults < SearchSettings->SearchResults.Num())
+	if (SessionIndexInSearchResults >= 0 && SessionIndexInSearchResults < CurrentSessionSearch->SearchResults.Num())
 	{
-		bResult = JoinSession(UserId, InSessionName, SearchSettings->SearchResults[SessionIndexInSearchResults]);
-	}
+		Session SessionToJoin = CurrentSessionSearch->SearchResults[SessionIndexInSearchResults];
+		FString SessionAddress = SessionToJoin.GetSessionAddress();
 
-	return bResult;
-}
-
-bool AShooterGameSession::JoinSession(TSharedPtr<const FUniqueNetId> UserId, FName InSessionName, const FOnlineSessionSearchResult& SearchResult)
-{
-	bool bResult = false;
-
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid() && UserId.IsValid())
+		if (TravelToSession(SessionAddress))
 		{
-			OnJoinSessionCompleteDelegateHandle = Sessions->AddOnJoinSessionCompleteDelegate_Handle(OnJoinSessionCompleteDelegate);
-			bResult = Sessions->JoinSession(*UserId, InSessionName, SearchResult);
-		}
-	}
-
-	return bResult;
-}
-
-/**
- * Delegate fired when the joining process for an online session has completed
- *
- * @param SessionName the name of the session this callback is for
- * @param bWasSuccessful true if the async action completed without error, false if there was an error
- */
-void AShooterGameSession::OnJoinSessionComplete(FName InSessionName, EOnJoinSessionCompleteResult::Type Result)
-{
-	bool bWillTravel = false;
-
-	UE_LOG(LogOnlineGame, Verbose, TEXT("OnJoinSessionComplete %s bSuccess: %d"), *InSessionName.ToString(), static_cast<int32>(Result));
-	
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid())
-		{
-			Sessions->ClearOnJoinSessionCompleteDelegate_Handle(OnJoinSessionCompleteDelegateHandle);
-		}
-	}
-
-	OnJoinSessionComplete().Broadcast(Result);
-}
-
-bool AShooterGameSession::TravelToSession(int32 ControllerId, FName InSessionName)
-{
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		FString URL;
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid() && Sessions->GetResolvedConnectString(InSessionName, URL))
-		{
-			APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), ControllerId);
-			if (PC)
-			{
-				PC->ClientTravel(URL, TRAVEL_Absolute);
-				return true;
-			}
-		}
-		else
-		{
-			UE_LOG(LogOnlineGame, Warning, TEXT("Failed to join session %s"), *SessionName.ToString());
-		}
-	}
-#if !UE_BUILD_SHIPPING
-	else
-	{
-		APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), ControllerId);
-		if (PC)
-		{
-			FString LocalURL(TEXT("127.0.0.1"));
-			PC->ClientTravel(LocalURL, TRAVEL_Absolute);
+			OnJoinSessionComplete().Broadcast(true);
 			return true;
 		}
 	}
-#endif //!UE_BUILD_SHIPPING
+
+	OnJoinSessionComplete().Broadcast(false);
+	return false;
+}
+
+bool AShooterGameSession::JoinSession(FString SessionAddress)
+{
+	UE_LOG(LogOnlineGame, Display, TEXT("Attempting to join session..."));
+
+	if (TravelToSession(SessionAddress))
+	{
+		OnJoinSessionComplete().Broadcast(true);
+		return true;
+	}
+
+	OnJoinSessionComplete().Broadcast(false);
+	return false;
+}
+
+bool AShooterGameSession::TravelToSession(FString SessionAddress)
+{
+	APlayerController* const PlayerController = GetWorld()->GetFirstPlayerController();
+	if (PlayerController)
+	{
+		PlayerController->ClientTravel(SessionAddress, TRAVEL_Absolute);
+		return true;
+	}
 
 	return false;
 }

@@ -95,14 +95,6 @@ protected:
 	void OnFindSessionsComplete(const IMSSessionManagerAPI::OpenAPISessionManagerV0Api::ListSessionsV0Response& Response);
 
 	/**
-	 * Delegate fired when a session join request has completed
-	 *
-	 * @param SessionName the name of the session this callback is for
-	 * @param bWasSuccessful true if the async action completed without error, false if there was an error
-	 */
-	void OnJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
-
-	/**
 	 * Delegate fired when a destroying an online session has completed
 	 *
 	 * @param SessionName the name of the session this callback is for
@@ -143,17 +135,15 @@ protected:
 	/*
 	 * Event triggered when a session is created
 	 */
-	DECLARE_EVENT_TwoParams(AShooterGameSession, FOnCreateSessionIMSComplete, FString /*SessionAddress*/, bool /*bWasSuccessful*/);
-	FOnCreateSessionIMSComplete CreateSessionCompleteEvent;
+	DECLARE_EVENT_TwoParams(AShooterGameSession, FOnCreateSessionComplete, FString /*SessionAddress*/, bool /*bWasSuccessful*/);
+	FOnCreateSessionComplete CreateSessionCompleteEvent;
 
 	/* 
 	 * Event triggered when a session is joined
 	 *
-	 * @param SessionName name of session that was joined
-	 * @param bWasSuccessful was the create successful
+	 * @param bWasSuccessful was the join successful
 	 */
-	//DECLARE_DELEGATE_RetVal_TwoParams(bool, FOnJoinSessionComplete, FName /*SessionName*/, bool /*bWasSuccessful*/);
-	DECLARE_EVENT_OneParam(AShooterGameSession, FOnJoinSessionComplete, EOnJoinSessionCompleteResult::Type /*Result*/);
+	DECLARE_EVENT_OneParam(AShooterGameSession, FOnJoinSessionComplete, bool /*bWasSuccessful*/);
 	FOnJoinSessionComplete JoinSessionCompleteEvent;
 
 	/*
@@ -190,23 +180,20 @@ public:
 	/**
 	 * Joins one of the session in search results
 	 *
-	 * @param UserId user that initiated the request
-	 * @param SessionName name of session 
 	 * @param SessionIndexInSearchResults Index of the session in search results
 	 *
 	 * @return bool true if successful, false otherwise
 	 */
-	bool JoinSession(TSharedPtr<const FUniqueNetId> UserId, FName SessionName, int32 SessionIndexInSearchResults);
+	bool JoinSession(int32 SessionIndexInSearchResults);
 
 	/**
-	 * Joins a session via a search result
+	 * Joins a session via its address after creating a session
 	 *
-	 * @param SessionName name of session 
-	 * @param SearchResult Session to join
+	 * @param SessionAddress session to join
 	 *
 	 * @return bool true if successful, false otherwise
 	 */
-	bool JoinSession(TSharedPtr<const FUniqueNetId> UserId, FName SessionName, const FOnlineSessionSearchResult& SearchResult);
+	bool JoinSession(FString SessionAddress);
 
 	/** @return true if any online async work is in progress, false otherwise */
 	bool IsBusy() const;
@@ -215,7 +202,7 @@ public:
 	const TArray<Session>& GetSearchResults() const;
 
 	/** @return the delegate fired when creating a session */
-	FOnCreateSessionIMSComplete& OnCreateSessionComplete() { return CreateSessionCompleteEvent; }
+	FOnCreateSessionComplete& OnCreateSessionComplete() { return CreateSessionCompleteEvent; }
 
 	/** @return the delegate fired when joining a session */
 	FOnJoinSessionComplete& OnJoinSessionComplete() { return JoinSessionCompleteEvent; }
@@ -230,14 +217,11 @@ public:
 	virtual void HandleMatchHasEnded() override;
 
 	/**
-	 * Travel to a session URL (as client) for a given session
-	 *
-	 * @param ControllerId controller initiating the session travel
-	 * @param SessionName name of session to travel to
+	 * Travel to a session address (as client) for a given session
 	 *
 	 * @return true if successful, false otherwise
 	 */
-	bool TravelToSession(int32 ControllerId, FName SessionName);
+	bool TravelToSession(FString SessionAddress);
 
 	/** Handles to various registered delegates */
 	FDelegateHandle OnStartSessionCompleteDelegateHandle;

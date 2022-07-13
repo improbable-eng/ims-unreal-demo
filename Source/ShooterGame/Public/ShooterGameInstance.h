@@ -110,7 +110,6 @@ public:
 
 	bool HostGame(const int32 PlayersCount, const int32 BotsCount);
 	bool JoinSession(ULocalPlayer* LocalPlayer, int32 SessionIndexInSearchResults);
-	bool JoinSession(ULocalPlayer* LocalPlayer, const FOnlineSessionSearchResult& SearchResult);
 	void SetPendingInvite(const FShooterPendingInvite& InPendingInvite);
 
 	bool PlayDemo(ULocalPlayer* LocalPlayer, const FString& DemoName);
@@ -334,7 +333,7 @@ private:
 	void TravelLocalSessionFailure(UWorld *World, ETravelFailure::Type FailureType, const FString& ErrorString);
 
 	/** Callback which is intended to be called upon joining session */
-	void OnJoinSessionComplete(EOnJoinSessionCompleteResult::Type Result);
+	void OnJoinSessionComplete(bool bWasSuccessful);
 
 	/** Callback which is called after adding local users to a session we're joining */
 	void OnRegisterJoiningLocalPlayerComplete(const FUniqueNetId& PlayerId, EOnJoinSessionCompleteResult::Type Result);

@@ -216,12 +216,7 @@ void SShooterServerList::ConnectToServer()
 		// unsafe
 		return;
 	}
-#if WITH_EDITOR
-	if (GIsEditor == true)
-	{
-		return;
-	}
-#endif
+
 	if (SelectedItem.IsValid())
 	{
 		int ServerToJoin = SelectedItem->SearchResultsIndex;
@@ -234,7 +229,7 @@ void SShooterServerList::ConnectToServer()
 		UShooterGameInstance* const GI = Cast<UShooterGameInstance>(PlayerOwner->GetGameInstance());
 		if (GI)
 		{
-			//GI->JoinSession(PlayerOwner.Get(), ServerToJoin);
+			GI->JoinSession(PlayerOwner.Get(), ServerToJoin);
 		}
 	}
 }
