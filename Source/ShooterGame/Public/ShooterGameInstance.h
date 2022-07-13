@@ -125,7 +125,7 @@ public:
 	void BeginHostingQuickMatch();
 
 	/** Initiates the session searching */
-	bool FindSessions(ULocalPlayer* PlayerOwner, bool bIsDedicatedServer, bool bLANMatch);
+	bool FindSessions(ULocalPlayer* PlayerOwner);
 
 	/** Sends the game to the specified state. */
 	void GotoState(FName NewState);

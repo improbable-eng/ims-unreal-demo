@@ -340,15 +340,7 @@ void FShooterMainMenu::Construct(TWeakObjectPtr<UShooterGameInstance> _GameInsta
 		NumberOfBotsOption->SelectedMultiChoice = BotsCountOpt;
 
 		// JOIN menu option
-		MenuItem = MenuHelper::AddMenuItem(RootMenuItem, LOCTEXT("Join", "JOIN"));
-
-		// submenu under "join"
-		MenuHelper::AddMenuItemSP(MenuItem, LOCTEXT("Server", "SERVER"), this, &FShooterMainMenu::OnJoinServer);
-		JoinLANItem = MenuHelper::AddMenuOptionSP(MenuItem, LOCTEXT("LanMatch", "LAN"), OnOffList, this, &FShooterMainMenu::LanMatchChanged);
-		JoinLANItem->SelectedMultiChoice = bIsLanMatch;
-
-		DedicatedItem = MenuHelper::AddMenuOptionSP(MenuItem, LOCTEXT("Dedicated", "Dedicated"), OnOffList, this, &FShooterMainMenu::DedicatedServerChanged);
-		DedicatedItem->SelectedMultiChoice = bIsDedicatedServer;
+		MenuItem = MenuHelper::AddMenuItemSP(RootMenuItem, LOCTEXT("Join", "JOIN"), this, &FShooterMainMenu::OnJoinServer);
 
 		// Server list widget that will be called up if appropriate
 		MenuHelper::AddCustomMenuItem(JoinServerItem,SAssignNew(ServerListWidget,SShooterServerList).OwnerWidget(MenuWidget).PlayerOwner(GetPlayerOwner()));
@@ -1119,7 +1111,7 @@ void FShooterMainMenu::OnUIHost()
 	if (World && ControllerId != -1)
 	{
 		const FShooterMenuSoundsStyle& MenuSounds = FShooterStyle::Get().GetWidgetStyle<FShooterMenuSoundsStyle>("DefaultShooterMenuSoundsStyle");
-		MenuHelper::PlaySoundAndCall(World, MenuSounds.StartGameSound, ControllerId, this, &FShooterMainMenu::HostGame);
+		MenuHelper::PlaySoundAndCall(World, MenuSounds.StartGameSound, ControllerId, this, &FShooterMainMenu::HostGame, false);
 	}
 }
 
@@ -1276,7 +1268,7 @@ void FShooterMainMenu::OnUserCanPlayOnlineJoin(const FUniqueNetId& UserId, EUser
 		MenuWidget->NextMenu = JoinServerItem->SubMenu;
 		//FString SelectedMapFilterName = JoinMapOption->MultiChoice[JoinMapOption->SelectedMultiChoice].ToString();
 
-		ServerListWidget->BeginServerSearch(bIsLanMatch, bIsDedicatedServer, SelectedMapFilterName);
+		ServerListWidget->BeginServerSearch();
 		ServerListWidget->UpdateServerList();
 		MenuWidget->EnterSubMenu();
 #endif

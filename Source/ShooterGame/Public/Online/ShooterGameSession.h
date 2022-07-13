@@ -7,6 +7,7 @@
 #include "HttpModule.h"
 #include "OpenAPISessionManagerV0Api.h"
 #include "OpenAPISessionManagerV0ApiOperations.h"
+#include "SessionSearch.h"
 #include "ShooterGameSession.generated.h"
 
 struct FShooterGameSessionParams
@@ -52,6 +53,9 @@ protected:
 	/* Session Manager API interface */
 	TSharedPtr<IMSSessionManagerAPI::OpenAPISessionManagerV0Api> SessionManagerAPI;
 
+	/* Session Manager Search */
+	TSharedPtr<class SessionSearch> CurrentSessionSearch;
+
 	/** Delegate for creating a new session */
 	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FCreateSessionV0Delegate OnCreateSessionCompleteDelegate;
 	/** Delegate after starting a session */
@@ -59,7 +63,7 @@ protected:
 	/** Delegate for destroying a session */
 	FOnDestroySessionCompleteDelegate OnDestroySessionCompleteDelegate;
 	/** Delegate for searching for sessions */
-	FOnFindSessionsCompleteDelegate OnFindSessionsCompleteDelegate;
+	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FListSessionsV0Delegate OnFindSessionsCompleteDelegate;
 	/** Delegate after joining a session */
 	FOnJoinSessionCompleteDelegate OnJoinSessionCompleteDelegate;
 
@@ -88,7 +92,7 @@ protected:
 	 *
 	 * @param bWasSuccessful true if the async action completed without error, false if there was an error
 	 */
-	void OnFindSessionsComplete(bool bWasSuccessful);
+	void OnFindSessionsComplete(const IMSSessionManagerAPI::OpenAPISessionManagerV0Api::ListSessionsV0Response& Response);
 
 	/**
 	 * Delegate fired when a session join request has completed
@@ -181,7 +185,7 @@ public:
 	 * @param bIsLAN are we searching LAN matches
 	 * @param bIsPresence are we searching presence sessions
 	 */
-	void FindSessions(TSharedPtr<const FUniqueNetId> UserId, FName SessionName, bool bIsLAN, bool bIsPresence);
+	void FindSessions(FString SessionTicket);
 
 	/**
 	 * Joins one of the session in search results
@@ -207,22 +211,8 @@ public:
 	/** @return true if any online async work is in progress, false otherwise */
 	bool IsBusy() const;
 
-	/**
-	 * Get the search results found and the current search result being probed
-	 *
-	 * @param SearchResultIdx idx of current search result accessed
-	 * @param NumSearchResults number of total search results found in FindGame()
-	 *
-	 * @return State of search result query
-	 */
-	EOnlineAsyncTaskState::Type GetSearchResultStatus(int32& SearchResultIdx, int32& NumSearchResults);
-
-	/**
-	 * Get the search results.
-	 *
-	 * @return Search results
-	 */
-	const TArray<FOnlineSessionSearchResult> & GetSearchResults() const;
+	const SearchState GetSearchSessionsStatus() const;
+	const TArray<Session>& GetSearchResults() const;
 
 	/** @return the delegate fired when creating a session */
 	FOnCreateSessionIMSComplete& OnCreateSessionComplete() { return CreateSessionCompleteEvent; }

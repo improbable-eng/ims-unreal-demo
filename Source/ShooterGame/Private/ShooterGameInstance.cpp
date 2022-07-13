@@ -1159,35 +1159,39 @@ void UShooterGameInstance::InternalTravelToSession(const FName& SessionName)
 }
 
 /** Initiates the session searching */
-bool UShooterGameInstance::FindSessions(ULocalPlayer* PlayerOwner, bool bIsDedicatedServer, bool bFindLAN)
+bool UShooterGameInstance::FindSessions(ULocalPlayer* PlayerOwner)
 {
-	bool bResult = false;
+	CheckPlayerIsLoggedIn();
 
-	check(PlayerOwner != nullptr);
-	if (PlayerOwner)
+	AShooterGameSession* const GameSession = GetGameSession();
+	if (GameSession && !SessionTicket.IsEmpty())
 	{
-		AShooterGameSession* const GameSession = GetGameSession();
-		if (GameSession)
-		{
-			GameSession->OnFindSessionsComplete().RemoveAll(this);
-			OnSearchSessionsCompleteDelegateHandle = GameSession->OnFindSessionsComplete().AddUObject(this, &UShooterGameInstance::OnSearchSessionsComplete);
+		GameSession->OnFindSessionsComplete().RemoveAll(this);
+		OnSearchSessionsCompleteDelegateHandle = GameSession->OnFindSessionsComplete().AddUObject(this, &UShooterGameInstance::OnSearchSessionsComplete);
 
-			GameSession->FindSessions(PlayerOwner->GetPreferredUniqueNetId().GetUniqueNetId(), NAME_GameSession, bFindLAN, !bIsDedicatedServer);
-
-			bResult = true;
-		}
+		GameSession->FindSessions(SessionTicket);
+		return true;
 	}
 
-	return bResult;
+	return false;
 }
 
 /** Callback which is intended to be called upon finding sessions */
 void UShooterGameInstance::OnSearchSessionsComplete(bool bWasSuccessful)
 {
-	AShooterGameSession* const Session = GetGameSession();
-	if (Session)
+	UE_LOG(LogOnlineGame, Display, TEXT("OnSearchSessionsComplete successful: %s"), bWasSuccessful ? TEXT("true") : TEXT("false"));
+
+	if (!bWasSuccessful)
 	{
-		Session->OnFindSessionsComplete().Remove(OnSearchSessionsCompleteDelegateHandle);
+		FText ReturnReason = NSLOCTEXT("NetworkErrors", "SearchSessionsFailed", "Could not search for sessions. Please try again.");
+		FText OKButton = NSLOCTEXT("DialogButtons", "OKAY", "OK");
+		ShowMessageThenGoMain(ReturnReason, OKButton, FText::GetEmpty());
+	}
+
+	AShooterGameSession* const GameSession = GetGameSession();
+	if (GameSession)
+	{
+		GameSession->OnFindSessionsComplete().Remove(OnSearchSessionsCompleteDelegateHandle);
 	}
 }
 

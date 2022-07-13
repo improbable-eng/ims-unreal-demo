@@ -19,13 +19,14 @@ AShooterGameSession::AShooterGameSession(const FObjectInitializer& ObjectInitial
 		OnCreateSessionCompleteDelegate = IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FCreateSessionV0Delegate::CreateUObject(this, &AShooterGameSession::OnCreateSessionComplete);
 		OnDestroySessionCompleteDelegate = FOnDestroySessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnDestroySessionComplete);
 
-		OnFindSessionsCompleteDelegate = FOnFindSessionsCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnFindSessionsComplete);
+		OnFindSessionsCompleteDelegate = IMSSessionManagerAPI::OpenAPISessionManagerV0Api::FListSessionsV0Delegate::CreateUObject(this, &AShooterGameSession::OnFindSessionsComplete);
 		OnJoinSessionCompleteDelegate = FOnJoinSessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnJoinSessionComplete);
 
 		OnStartSessionCompleteDelegate = FOnStartSessionCompleteDelegate::CreateUObject(this, &AShooterGameSession::OnStartOnlineGameComplete);
 
 		RetryPolicy = IMSSessionManagerAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
 		SessionManagerAPI = MakeShared<IMSSessionManagerAPI::OpenAPISessionManagerV0Api>();
+		CurrentSessionSearch = MakeShared<class SessionSearch>();
 	}
 }
 
@@ -133,35 +134,6 @@ bool AShooterGameSession::IsBusy() const
 	return false;
 }
 
-EOnlineAsyncTaskState::Type AShooterGameSession::GetSearchResultStatus(int32& SearchResultIdx, int32& NumSearchResults)
-{
-	SearchResultIdx = 0;
-	NumSearchResults = 0;
-
-	if (SearchSettings.IsValid())
-	{
-		if (SearchSettings->SearchState == EOnlineAsyncTaskState::Done)
-		{
-			SearchResultIdx = CurrentSessionParams.BestSessionIdx;
-			NumSearchResults = SearchSettings->SearchResults.Num();
-		}
-		return SearchSettings->SearchState;
-	}
-
-	return EOnlineAsyncTaskState::NotStarted;
-}
-
-/**
- * Get the search results.
- *
- * @return Search results
- */
-const TArray<FOnlineSessionSearchResult> & AShooterGameSession::GetSearchResults() const
-{ 
-	return SearchSettings->SearchResults; 
-};
-
-
 /**
  * Delegate fired when a session create request has completed
  */
@@ -232,27 +204,32 @@ void AShooterGameSession::HostSession(const int32 MaxNumPlayers, const int32 Bot
 	FHttpModule::Get().GetHttpManager().Flush(false);
 }
 
-void AShooterGameSession::OnFindSessionsComplete(bool bWasSuccessful)
+void AShooterGameSession::OnFindSessionsComplete(const IMSSessionManagerAPI::OpenAPISessionManagerV0Api::ListSessionsV0Response& Response)
 {
-	UE_LOG(LogOnlineGame, Verbose, TEXT("OnFindSessionsComplete bSuccess: %d"), bWasSuccessful);
-
-	IOnlineSubsystem* const OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
+	if (Response.IsSuccessful())
 	{
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid())
+		UE_LOG(LogOnlineGame, Display, TEXT("Successfully listed sessions."));
+
+		TArray<Session> SearchResults;
+
+		for (IMSSessionManagerAPI::OpenAPIV0Session SessionResult : Response.Content.Sessions)
 		{
-			Sessions->ClearOnFindSessionsCompleteDelegate_Handle(OnFindSessionsCompleteDelegateHandle);
-
-			UE_LOG(LogOnlineGame, Verbose, TEXT("Num Search Results: %d"), SearchSettings->SearchResults.Num());
-			for (int32 SearchIdx=0; SearchIdx < SearchSettings->SearchResults.Num(); SearchIdx++)
+			if (SearchResults.Num() < CurrentSessionSearch->MaxSearchResults)
 			{
-				const FOnlineSessionSearchResult& SearchResult = SearchSettings->SearchResults[SearchIdx];
-				DumpSession(&SearchResult.Session);
+				SearchResults.Add(Session(SessionResult));
 			}
-
-			OnFindSessionsComplete().Broadcast(bWasSuccessful);
 		}
+
+		CurrentSessionSearch->SearchResults = SearchResults;
+		CurrentSessionSearch->SearchState = SearchState::Done;
+
+		OnFindSessionsComplete().Broadcast(true);
+	}
+	else
+	{
+		UE_LOG(LogOnlineGame, Display, TEXT("Failed to list sessions."));
+		CurrentSessionSearch->SearchState = SearchState::Failed;
+		OnFindSessionsComplete().Broadcast(false);
 	}
 }
 
@@ -322,32 +299,31 @@ FString AShooterGameSession::CreateSessionConfigJson(const int32 MaxNumPlayers, 
 	return SessionConfig;
 }
 
-void AShooterGameSession::FindSessions(TSharedPtr<const FUniqueNetId> UserId, FName InSessionName, bool bIsLAN, bool bIsPresence)
+const SearchState AShooterGameSession::GetSearchSessionsStatus() const
 {
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	if (OnlineSub)
-	{
-		CurrentSessionParams.SessionName = InSessionName;
-		CurrentSessionParams.bIsLAN = bIsLAN;
-		CurrentSessionParams.bIsPresence = bIsPresence;
-		CurrentSessionParams.UserId = UserId;
+	return CurrentSessionSearch->SearchState;
+}
 
-		IOnlineSessionPtr Sessions = OnlineSub->GetSessionInterface();
-		if (Sessions.IsValid() && CurrentSessionParams.UserId.IsValid())
-		{
-			SearchSettings = MakeShareable(new FShooterOnlineSearchSettings(bIsLAN, bIsPresence));
-			SearchSettings->QuerySettings.Set(SEARCH_KEYWORDS, CustomMatchKeyword, EOnlineComparisonOp::Equals);
+const TArray<Session>& AShooterGameSession::GetSearchResults() const
+{
+	return CurrentSessionSearch->SearchResults;
+}
 
-			TSharedRef<FOnlineSessionSearch> SearchSettingsRef = SearchSettings.ToSharedRef();
+void AShooterGameSession::FindSessions(FString SessionTicket)
+{
+	// See the following doc for more information https://docs.ims.improbable.io/docs/ims-session-manager/guides/authetication
+	SessionManagerAPI->AddHeaderParam("Authorization", "Bearer playfab/" + SessionTicket);
 
-			OnFindSessionsCompleteDelegateHandle = Sessions->AddOnFindSessionsCompleteDelegate_Handle(OnFindSessionsCompleteDelegate);
-			Sessions->FindSessions(*CurrentSessionParams.UserId, SearchSettingsRef);
-		}
-	}
-	else
-	{
-		OnFindSessionsComplete(false);
-	}
+	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::ListSessionsV0Request Request;
+	Request.SetShouldRetry(RetryPolicy);
+	Request.ProjectId = IMSProjectId;
+	Request.SessionType = IMSSessionType;
+
+	UE_LOG(LogOnlineGame, Display, TEXT("Attempting to list sessions..."));
+	CurrentSessionSearch->SearchState = SearchState::InProgress;
+	SessionManagerAPI->ListSessionsV0(Request, OnFindSessionsCompleteDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
 }
 
 bool AShooterGameSession::JoinSession(TSharedPtr<const FUniqueNetId> UserId, FName InSessionName, int32 SessionIndexInSearchResults)
