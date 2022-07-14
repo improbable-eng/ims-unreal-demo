@@ -150,6 +150,12 @@ protected:
 	/* Check for -zeuz flag to know that the server is running in IMS zeuz */
 	bool IsRunningOnZeuz();
 
+	/* Check for -session-manager flag to know that the session was created by IMS Session Manager */
+	bool WasCreatedBySessionManager();
+
+	/* IMS Payload State */
+	IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values CurrentPayloadState;
+
 	/* Setup Payload local API */
 	void SetupPayloadLocalAPI();
 
@@ -165,6 +171,11 @@ protected:
 	IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate OnSetPayloadToReadyDelegate;
 	void OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response);
 	void TrySetPayloadToReady();
+
+	/* Retrieve details of the current payload, including metadata and status */
+	IMSZeuzAPI::OpenAPIPayloadLocalApi::FGetPayloadV0Delegate OnUpdatePayloadStatusDelegate;
+	void OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::GetPayloadV0Response& Response);
+	void UpdatePayloadStatus();
 
 	/** Send all clients back to the main menu */
 	void ExitPlayersToMainMenu();

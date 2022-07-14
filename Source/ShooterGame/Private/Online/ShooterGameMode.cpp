@@ -62,11 +62,7 @@ void AShooterGameMode::InitGame(const FString& MapName, const FString& Options, 
 	SetAllowBots(BotsCountOptionValue > 0 ? true : false, BotsCountOptionValue);	
 	Super::InitGame(MapName, Options, ErrorMessage);
 
-	const UGameInstance* GameInstance = GetGameInstance();
-	if (GameInstance && Cast<UShooterGameInstance>(GameInstance)->GetOnlineMode() != EOnlineMode::Offline)
-	{
-		bPauseable = false;
-	}
+	bPauseable = false;
 }
 
 void AShooterGameMode::SetAllowBots(bool bInAllowBots, int32 InMaxBots)
@@ -86,11 +82,19 @@ bool AShooterGameMode::IsRunningOnZeuz()
 	return FParse::Param(FCommandLine::Get(), TEXT("zeuz"));
 }
 
+bool AShooterGameMode::WasCreatedBySessionManager()
+{
+	return FParse::Param(FCommandLine::Get(), TEXT("session-manager"));
+}
+
 void AShooterGameMode::SetupPayloadLocalAPI()
 {
+	CurrentPayloadState = IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unknown;
+
 	RetryPolicy = IMSZeuzAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
 	PayloadLocalAPI = MakeShared<IMSZeuzAPI::OpenAPIPayloadLocalApi>();
 	OnSetPayloadToReadyDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate::CreateUObject(this, &AShooterGameMode::OnSetPayloadToReadyComplete);
+	OnUpdatePayloadStatusDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FGetPayloadV0Delegate::CreateUObject(this, &AShooterGameMode::OnUpdatePayloadStatusComplete);
 
 	FString payloadApiDomain = FPlatformMisc::GetEnvironmentVariable(*FString("ORCHESTRATION_PAYLOAD_API"));
 
@@ -126,6 +130,8 @@ void AShooterGameMode::DefaultTimer()
 		}
 		return;
 	}
+
+	UpdatePayloadStatus();
 
 	AShooterGameState* const MyGameState = Cast<AShooterGameState>(GameState);
 	if (MyGameState && MyGameState->RemainingTime > 0 && !MyGameState->bTimerPaused)
@@ -219,6 +225,16 @@ void AShooterGameMode::TrySetPayloadToReady()
 	FHttpModule::Get().GetHttpManager().Flush(false);
 }
 
+void AShooterGameMode::UpdatePayloadStatus()
+{
+	IMSZeuzAPI::OpenAPIPayloadLocalApi::GetPayloadV0Request Request;
+	Request.SetShouldRetry(RetryPolicy);
+
+	PayloadLocalAPI->GetPayloadV0(Request, OnUpdatePayloadStatusDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
+}
+
 void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response)
 {
 	if (Response.IsSuccessful())
@@ -229,6 +245,34 @@ void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayl
 	{
 		UE_LOG(LogGameMode, Display, TEXT("Failed to set Payload to Ready state."));
 		FGenericPlatformMisc::RequestExit(false); // Shutdown server
+	}
+}
+
+void AShooterGameMode::OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::GetPayloadV0Response& Response)
+{
+	if (Response.IsSuccessful())
+	{
+		IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values PendingState = Response.Content.Result.Status.State.Value;
+		if (CurrentPayloadState != PendingState)
+		{
+			CurrentPayloadState = PendingState;
+
+			if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Reserved && WasCreatedBySessionManager())
+			{
+				UE_LOG(LogGameMode, Display, TEXT("Updated payload status to reserved."));
+
+				// Retrieve session config
+			}
+			else if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Error || CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unhealthy)
+			{
+				UE_LOG(LogGameMode, Error, TEXT("Payload status is error/unhealthy"));
+				// Handle appropriately
+			}
+		}
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Failed to retrieve payload details."));
 	}
 }
 
@@ -349,11 +393,23 @@ bool AShooterGameMode::IsWinner(class AShooterPlayerState* PlayerState) const
 
 void AShooterGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
 {
+	if (CurrentPayloadState != IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Reserved)
+	{
+		// You may want to handle this case, but could result in race condition between 
+		//  the game server detecting the payload is reserved and a player trying to connect
+	}
+
 	AShooterGameState* const MyGameState = Cast<AShooterGameState>(GameState);
 	const bool bMatchIsOver = MyGameState && MyGameState->HasMatchEnded();
 	if( bMatchIsOver )
 	{
 		ErrorMessage = TEXT("Match is over!");
+	}
+	else if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Shutdown
+		|| CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unhealthy
+		|| CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Error)
+	{
+		ErrorMessage = TEXT("This server cannot be joined.");
 	}
 	else
 	{
