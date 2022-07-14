@@ -42,6 +42,12 @@ protected:
 	/** Delegate after joining a session */
 	FOnJoinSessionCompleteDelegate OnJoinSessionCompleteDelegate;
 
+	// If ProjectId is set when running the client in command line then use that, otherwise use hardcoded default from config
+	FString GetIMSProjectId();
+
+	// If SessionType is set when running the client in command line then use that, otherwise use hardcoded default from config
+	FString GetIMSSessionType();
+
 	/**
 	 * Delegate fired when a session create request has completed
 	 */
