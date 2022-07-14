@@ -104,6 +104,7 @@ void AShooterGameMode::SetupPayloadLocalAPI()
 	OnSetPayloadToReadyDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate::CreateUObject(this, &AShooterGameMode::OnSetPayloadToReadyComplete);
 	OnUpdatePayloadStatusDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FGetPayloadV0Delegate::CreateUObject(this, &AShooterGameMode::OnUpdatePayloadStatusComplete);
 	OnRetrieveSessionConfigDelegate = IMSZeuzAPI::OpenAPISessionManagerLocalApi::FGetSessionConfigV0Delegate::CreateUObject(this, &AShooterGameMode::OnRetrieveSessionConfigComplete);
+	OnSetSessionStatusDelegate = IMSZeuzAPI::OpenAPISessionManagerLocalApi::FApiV0SessionManagerStatusPostDelegate::CreateUObject(this, &AShooterGameMode::OnSetSessionStatusComplete);
 
 	FString payloadApiDomain = FPlatformMisc::GetEnvironmentVariable(*FString("ORCHESTRATION_PAYLOAD_API"));
 
@@ -265,6 +266,19 @@ void AShooterGameMode::RetrieveSessionConfig()
 	FHttpModule::Get().GetHttpManager().Flush(false);
 }
 
+void AShooterGameMode::SetSessionStatus()
+{
+	IMSZeuzAPI::OpenAPISessionManagerLocalApi::ApiV0SessionManagerStatusPostRequest Request;
+	Request.SetShouldRetry(RetryPolicy);
+
+	Request.RequestBody = CreateSessionStatusBody();
+
+	UE_LOG(LogGameMode, Display, TEXT("Attempting to set session status..."));
+	SessionManagerLocalAPI->ApiV0SessionManagerStatusPost(Request, OnSetSessionStatusDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
+}
+
 void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response)
 {
 	if (Response.IsSuccessful())
@@ -329,6 +343,18 @@ void AShooterGameMode::OnRetrieveSessionConfigComplete(const IMSZeuzAPI::OpenAPI
 	}
 }
 
+void AShooterGameMode::OnSetSessionStatusComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::ApiV0SessionManagerStatusPostResponse& Response)
+{
+	if (Response.IsSuccessful())
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Successfully set session status."));
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Failed to set session status."));
+	}
+}
+
 void AShooterGameMode::ProcessSessionConfig(FString SessionConfig)
 {
 	UE_LOG(LogGameMode, Display, TEXT("Processing SessionConfig: %s"), *SessionConfig);
@@ -358,8 +384,20 @@ void AShooterGameMode::ProcessSessionConfig(FString SessionConfig)
 			bNeedsBotCreation = false;
 		}
 
-		// Update Session Status
+		SetSessionStatus();
 	}
+}
+
+TMap<FString, FString> AShooterGameMode::CreateSessionStatusBody()
+{
+	TMap<FString, FString> Body;
+
+	Body.Add("GamePhase", GetMatchState().ToString());
+	Body.Add("MapName", GetWorld()->GetMapName());
+	Body.Add("CurrentNumPlayers", FString::FromInt(GetNumPlayers()));
+	Body.Add("MaxNumPlayers", FString::FromInt(MaxNumPlayers));
+
+	return Body;
 }
 
 void AShooterGameMode::ExitPlayersToMainMenu()
@@ -491,6 +529,10 @@ void AShooterGameMode::PreLogin(const FString& Options, const FString& Address, 
 	{
 		ErrorMessage = TEXT("Match is over!");
 	}
+	else if (GetNumPlayers() >= MaxNumPlayers)
+	{
+		ErrorMessage = TEXT("Player capacity is full!");
+	}
 	else if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Shutdown
 		|| CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unhealthy
 		|| CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Error)
@@ -522,6 +564,25 @@ void AShooterGameMode::PostLogin(APlayerController* NewPlayer)
 		NewPC->ClientGameStarted();
 		NewPC->ClientStartOnlineGame();
 	}
+
+	// Update Session Status so that player count reflects that a new player has joined
+	SetSessionStatus();
+}
+
+void AShooterGameMode::Logout(AController* Exiting)
+{
+	Super::Logout(Exiting);
+
+	// Update Session Status so that player count reflects that a player has left the game
+	SetSessionStatus();
+}
+
+void AShooterGameMode::SetMatchState(FName NewState)
+{
+	Super::SetMatchState(NewState);
+
+	// Update Session Status so that the match state is updated
+	SetSessionStatus();
 }
 
 void AShooterGameMode::Killed(AController* Killer, AController* KilledPlayer, APawn* KilledPawn, const UDamageType* DamageType)
