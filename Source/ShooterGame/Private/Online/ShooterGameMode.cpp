@@ -94,8 +94,11 @@ void AShooterGameMode::SetupPayloadLocalAPI()
 
 	RetryPolicy = IMSZeuzAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
 	PayloadLocalAPI = MakeShared<IMSZeuzAPI::OpenAPIPayloadLocalApi>();
+	SessionManagerLocalAPI = MakeShared<IMSZeuzAPI::OpenAPISessionManagerLocalApi>();
+	
 	OnSetPayloadToReadyDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate::CreateUObject(this, &AShooterGameMode::OnSetPayloadToReadyComplete);
 	OnUpdatePayloadStatusDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FGetPayloadV0Delegate::CreateUObject(this, &AShooterGameMode::OnUpdatePayloadStatusComplete);
+	OnRetrieveSessionConfigDelegate = IMSZeuzAPI::OpenAPISessionManagerLocalApi::FGetSessionConfigV0Delegate::CreateUObject(this, &AShooterGameMode::OnRetrieveSessionConfigComplete);
 
 	FString payloadApiDomain = FPlatformMisc::GetEnvironmentVariable(*FString("ORCHESTRATION_PAYLOAD_API"));
 
@@ -103,6 +106,7 @@ void AShooterGameMode::SetupPayloadLocalAPI()
 	{
 		FString payloadApiUrl = "http://" + payloadApiDomain;
 		PayloadLocalAPI->SetURL(payloadApiUrl);
+		SessionManagerLocalAPI->SetURL(payloadApiUrl);
 
 		UE_LOG(LogGameMode, Display, TEXT("Payload Local API URL was set to '%s'"), *payloadApiUrl);
 	}
@@ -245,6 +249,17 @@ void AShooterGameMode::UpdatePayloadStatus()
 	FHttpModule::Get().GetHttpManager().Flush(false);
 }
 
+void AShooterGameMode::RetrieveSessionConfig()
+{
+	IMSZeuzAPI::OpenAPISessionManagerLocalApi::GetSessionConfigV0Request Request;
+	Request.SetShouldRetry(RetryPolicy);
+
+	UE_LOG(LogGameMode, Display, TEXT("Attempting to retrieve session config..."));
+	SessionManagerLocalAPI->GetSessionConfigV0(Request, OnRetrieveSessionConfigDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
+}
+
 void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response)
 {
 	if (Response.IsSuccessful())
@@ -272,7 +287,7 @@ void AShooterGameMode::OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPa
 			{
 				UE_LOG(LogGameMode, Display, TEXT("Updated payload status to reserved."));
 
-				// Retrieve session config
+				RetrieveSessionConfig();
 			}
 			else if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Error || CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unhealthy)
 			{
@@ -284,6 +299,27 @@ void AShooterGameMode::OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPa
 	else
 	{
 		UE_LOG(LogGameMode, Display, TEXT("Failed to retrieve payload details."));
+	}
+}
+
+void AShooterGameMode::OnRetrieveSessionConfigComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::GetSessionConfigV0Response& Response)
+{
+	if (Response.IsSuccessful())
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Successfully retrieved session config."));
+
+		if (Response.Content.Config.IsSet())
+		{
+			// Process Json response and apply config to game server
+		}
+		else
+		{
+			UE_LOG(LogGameMode, Display, TEXT("No session config found to apply to game server."));
+		}
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Failed to retrieve session config."));
 	}
 }
 

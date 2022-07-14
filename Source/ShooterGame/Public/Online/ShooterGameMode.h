@@ -8,6 +8,8 @@
 #include "HttpManager.h"
 #include "OpenAPIPayloadLocalApi.h"
 #include "OpenAPIPayloadLocalApiOperations.h"
+#include "OpenAPISessionManagerLocalApi.h"
+#include "OpenAPISessionManagerLocalApiOperations.h"
 #include "ShooterGameMode.generated.h"
 
 class AShooterAIController;
@@ -168,8 +170,9 @@ protected:
 	int RetryTimeoutRelativeSeconds;
 	IMSZeuzAPI::HttpRetryParams RetryPolicy;
 
-	/* IMS Payload Local APIs */
+	/* IMS Zeuz APIs */
 	TSharedPtr<IMSZeuzAPI::OpenAPIPayloadLocalApi> PayloadLocalAPI;
+	TSharedPtr<IMSZeuzAPI::OpenAPISessionManagerLocalApi> SessionManagerLocalAPI;
 
 	/* Set the Payload to Ready when the GameServer is ready to accept connections */
 	IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate OnSetPayloadToReadyDelegate;
@@ -180,6 +183,11 @@ protected:
 	IMSZeuzAPI::OpenAPIPayloadLocalApi::FGetPayloadV0Delegate OnUpdatePayloadStatusDelegate;
 	void OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::GetPayloadV0Response& Response);
 	void UpdatePayloadStatus();
+
+	/* Retrieve the Session Config that was set by the Game Client when creating the session */
+	IMSZeuzAPI::OpenAPISessionManagerLocalApi::FGetSessionConfigV0Delegate OnRetrieveSessionConfigDelegate;
+	void OnRetrieveSessionConfigComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::GetSessionConfigV0Response& Response);
+	void RetrieveSessionConfig();
 
 	/** Send all clients back to the main menu */
 	void ExitPlayersToMainMenu();
