@@ -25,6 +25,28 @@ AShooterGameSession::AShooterGameSession(const FObjectInitializer& ObjectInitial
 	}
 }
 
+FString AShooterGameSession::GetIMSProjectId()
+{
+	FString ProjectId;
+	if (FParse::Value(FCommandLine::Get(), TEXT("ProjectId"), ProjectId))
+	{
+		return ProjectId;
+	}
+
+	return IMSProjectId;
+}
+
+FString AShooterGameSession::GetIMSSessionType()
+{
+	FString SessionType;
+	if (FParse::Value(FCommandLine::Get(), TEXT("SessionType"), SessionType))
+	{
+		return SessionType;
+	}
+
+	return IMSSessionType;
+}
+
 /**
  * Delegate fired when a session create request has completed
  */
@@ -63,8 +85,8 @@ void AShooterGameSession::HostSession(const int32 MaxNumPlayers, const int32 Bot
 
 	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::CreateSessionV0Request Request;
 	Request.SetShouldRetry(RetryPolicy);
-	Request.ProjectId = IMSProjectId;
-	Request.SessionType = IMSSessionType;
+	Request.ProjectId = GetIMSProjectId();
+	Request.SessionType = GetIMSSessionType();
 
 	IMSSessionManagerAPI::OpenAPIV0CreateSessionRequestBody RequestBody;
 	RequestBody.SessionConfig = CreateSessionConfigJson(MaxNumPlayers, BotsCount);
@@ -136,8 +158,8 @@ void AShooterGameSession::FindSessions(FString SessionTicket)
 
 	IMSSessionManagerAPI::OpenAPISessionManagerV0Api::ListSessionsV0Request Request;
 	Request.SetShouldRetry(RetryPolicy);
-	Request.ProjectId = IMSProjectId;
-	Request.SessionType = IMSSessionType;
+	Request.ProjectId = GetIMSProjectId();
+	Request.SessionType = GetIMSSessionType();
 
 	UE_LOG(LogOnlineGame, Display, TEXT("Attempting to list sessions..."));
 	CurrentSessionSearch->SearchState = SearchState::InProgress;
