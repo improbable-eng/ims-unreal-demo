@@ -41,6 +41,12 @@ class AShooterGameMode : public AGameMode
 	/** starts match warmup */
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 
+	/** Called when a Controller with a PlayerState leaves the game or is destroyed */
+	virtual void Logout(AController* Exiting) override;
+
+	/** Updates the match state and calls the appropriate transition functions */
+	virtual void SetMatchState(FName NewState);
+
 	/** Tries to spawn the player's pawn */
 	virtual void RestartPlayer(AController* NewPlayer) override;
 
@@ -170,6 +176,9 @@ protected:
 	int32 MaxNumPlayers;
 	int32 MaxNumBots;
 
+	/* Create session status body for set session status request */
+	TMap<FString, FString> CreateSessionStatusBody();
+
 	/* Retry policy and configuration */
 	int RetryLimitCount;
 	int RetryTimeoutRelativeSeconds;
@@ -193,6 +202,11 @@ protected:
 	IMSZeuzAPI::OpenAPISessionManagerLocalApi::FGetSessionConfigV0Delegate OnRetrieveSessionConfigDelegate;
 	void OnRetrieveSessionConfigComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::GetSessionConfigV0Response& Response);
 	void RetrieveSessionConfig();
+
+	/* Set the Session Status */
+	IMSZeuzAPI::OpenAPISessionManagerLocalApi::FApiV0SessionManagerStatusPostDelegate OnSetSessionStatusDelegate;
+	void OnSetSessionStatusComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::ApiV0SessionManagerStatusPostResponse& Response);
+	void SetSessionStatus();
 
 	/** Send all clients back to the main menu */
 	void ExitPlayersToMainMenu();
