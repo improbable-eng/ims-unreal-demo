@@ -4,6 +4,7 @@
 
 #include "OnlineIdentityInterface.h"
 #include "ShooterPlayerController.h"
+#include "Json.h"
 #include "HttpModule.h"
 #include "HttpManager.h"
 #include "OpenAPIPayloadLocalApi.h"
@@ -112,9 +113,6 @@ protected:
 	UPROPERTY(config)
 	float DamageSelfScale;
 
-	UPROPERTY(config)
-	int32 MaxBots;
-
 	UPROPERTY()
 	TArray<AShooterAIController*> BotControllers;
 
@@ -164,6 +162,13 @@ protected:
 
 	/* Setup Payload local API */
 	void SetupPayloadLocalAPI();
+
+	/* Called after retrieving Session Config */
+	void ProcessSessionConfig(FString SessionConfig);
+
+	/* Session Config parameters */
+	int32 MaxNumPlayers;
+	int32 MaxNumBots;
 
 	/* Retry policy and configuration */
 	int RetryLimitCount;

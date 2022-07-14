@@ -9,6 +9,7 @@
 #include "Online/ShooterPlayerState.h"
 #include "Online/ShooterGameSession.h"
 #include "Bots/ShooterAIController.h"
+#include "Math/UnrealMathUtility.h"
 #include "ShooterTeamStart.h"
 
 
@@ -32,6 +33,9 @@ AShooterGameMode::AShooterGameMode(const FObjectInitializer& ObjectInitializer) 
 	bAllowBots = true;	
 	bNeedsBotCreation = true;
 	bUseSeamlessTravel = FParse::Param(FCommandLine::Get(), TEXT("NoSeamlessTravel")) ? false : true;
+
+	MaxNumPlayers = DEFAULT_NUMBER_PLAYERS;
+	MaxNumBots = DEFAULT_NUMBER_BOTS;
 
 	RetryLimitCount = 10;
 	RetryTimeoutRelativeSeconds = 5;
@@ -58,8 +62,7 @@ FString AShooterGameMode::GetBotsCountOptionName()
 
 void AShooterGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
-	const int32 BotsCountOptionValue = UGameplayStatics::GetIntOption(Options, GetBotsCountOptionName(), 0);
-	SetAllowBots(BotsCountOptionValue > 0 ? true : false, BotsCountOptionValue);	
+	SetAllowBots(DEFAULT_NUMBER_BOTS > 0 ? true : false, DEFAULT_NUMBER_BOTS);
 	Super::InitGame(MapName, Options, ErrorMessage);
 
 	bPauseable = false;
@@ -68,7 +71,9 @@ void AShooterGameMode::InitGame(const FString& MapName, const FString& Options, 
 void AShooterGameMode::SetAllowBots(bool bInAllowBots, int32 InMaxBots)
 {
 	bAllowBots = bInAllowBots;
-	MaxBots = InMaxBots;
+	MaxNumBots = FMath::Clamp(InMaxBots, MIN_NUMBER_BOTS, MAX_NUMBER_BOTS);
+
+	UE_LOG(LogGameMode, Display, TEXT("SetAllowBots: bAllowBots = %s, MaxNumBots = %d"), bAllowBots ? TEXT("true") : TEXT("false"), MaxNumBots);
 }
 
 /** Returns game session class to use */
@@ -311,6 +316,7 @@ void AShooterGameMode::OnRetrieveSessionConfigComplete(const IMSZeuzAPI::OpenAPI
 		if (Response.Content.Config.IsSet())
 		{
 			// Process Json response and apply config to game server
+			ProcessSessionConfig(Response.Content.Config.GetValue());
 		}
 		else
 		{
@@ -320,6 +326,39 @@ void AShooterGameMode::OnRetrieveSessionConfigComplete(const IMSZeuzAPI::OpenAPI
 	else
 	{
 		UE_LOG(LogGameMode, Display, TEXT("Failed to retrieve session config."));
+	}
+}
+
+void AShooterGameMode::ProcessSessionConfig(FString SessionConfig)
+{
+	UE_LOG(LogGameMode, Display, TEXT("Processing SessionConfig: %s"), *SessionConfig);
+
+	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(SessionConfig);
+
+	if (!FJsonSerializer::Deserialize(Reader, JsonObject))
+	{
+		// The deserialization failed, handle this case
+		UE_LOG(LogGameMode, Display, TEXT("Failed to deserialize Json from Session Config."));
+	}
+	else
+	{
+		int32 MaxNumPlayersFromJson;
+		int32 BotsCountFromJson;
+
+		if (JsonObject->TryGetNumberField("MaxNumPlayers", MaxNumPlayersFromJson))
+		{
+			MaxNumPlayers = FMath::Clamp(MaxNumPlayersFromJson, MIN_NUMBER_PLAYERS, MAX_NUMBER_PLAYERS);
+		}
+
+		if (JsonObject->TryGetNumberField("BotsCount", BotsCountFromJson))
+		{
+			SetAllowBots(BotsCountFromJson > 0 ? true : false, BotsCountFromJson);
+			CreateBotControllers();
+			bNeedsBotCreation = false;
+		}
+
+		// Update Session Status
 	}
 }
 
@@ -691,7 +730,7 @@ void AShooterGameMode::CreateBotControllers()
 
 	// Create any necessary AIControllers.  Hold off on Pawn creation until pawns are actually necessary or need recreating.	
 	int32 BotNum = ExistingBots;
-	for (int32 i = 0; i < MaxBots - ExistingBots; ++i)
+	for (int32 i = 0; i < MaxNumBots - ExistingBots; ++i)
 	{
 		CreateBot(BotNum + i);
 	}
