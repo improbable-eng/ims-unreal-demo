@@ -90,6 +90,7 @@ bool AShooterGameMode::WasCreatedBySessionManager()
 void AShooterGameMode::SetupPayloadLocalAPI()
 {
 	CurrentPayloadState = IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unknown;
+	TimeOfLastPayloadStateChange = 0;
 
 	RetryPolicy = IMSZeuzAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
 	PayloadLocalAPI = MakeShared<IMSZeuzAPI::OpenAPIPayloadLocalApi>();
@@ -138,6 +139,15 @@ void AShooterGameMode::DefaultTimer()
 	{
 		if (GetMatchState() == MatchState::WaitingToStart && GetNumPlayers() == 0)
 		{
+			if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Reserved)
+			{
+				if (UGameplayStatics::GetRealTimeSeconds(GetWorld()) - TimeOfLastPayloadStateChange > TimeBeforeReservedPayloadTimeout)
+				{
+					// Shutdown server to avoid filling allocation buffer with reserved payloads that are not being used
+					FGenericPlatformMisc::RequestExit(false);
+				}
+			}
+			
 			return;
 		}
 
@@ -256,6 +266,7 @@ void AShooterGameMode::OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPa
 		if (CurrentPayloadState != PendingState)
 		{
 			CurrentPayloadState = PendingState;
+			TimeOfLastPayloadStateChange = UGameplayStatics::GetRealTimeSeconds(GetWorld());
 
 			if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Reserved && WasCreatedBySessionManager())
 			{

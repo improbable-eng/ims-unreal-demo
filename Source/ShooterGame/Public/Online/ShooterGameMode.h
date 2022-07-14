@@ -118,6 +118,9 @@ protected:
 
 	UPROPERTY(config)
 	TSubclassOf<AShooterPlayerController> PlatformPlayerControllerClass;
+
+	UPROPERTY(config)
+	int32 TimeBeforeReservedPayloadTimeout;
 	
 	/** Handle for efficient management of DefaultTimer timer */
 	FTimerHandle TimerHandle_DefaultTimer;
@@ -155,6 +158,7 @@ protected:
 
 	/* IMS Payload State */
 	IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values CurrentPayloadState;
+	float TimeOfLastPayloadStateChange;
 
 	/* Setup Payload local API */
 	void SetupPayloadLocalAPI();
