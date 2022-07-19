@@ -298,7 +298,7 @@ void AShooterGameMode::OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPa
 **Note:** A `session-manager` flag was added to know whether the game server was created by the Session Manager, as there are some operations (e.g. retrieving session config) which are only applicable to the Session Manager.
 
 ### 2. Shutdown server if no players join a reserved session
->**Associated commit:** [https://github.com/improbable-eng/ims-unreal-demo/commit/d580b70031f4c9433b667abbffa086e502379865](https://github.com/improbable-eng/ims-unreal-demo/commit/d580b70031f4c9433b667abbffa086e502379865)
+>**Associated commit:** [Shutdown server if no players join a reserved session](https://github.com/improbable-eng/ims-unreal-demo/commit/d580b70031f4c9433b667abbffa086e502379865)
 
 Because the server waits for players to connect before it starts counting down, if no players join the reserved payload, the payload will stay in that state indefinitely. This will fill up the allocation with unused payloads. If no players join a reserved session after a given amount of time, **the game server should shut itself down**.
 
