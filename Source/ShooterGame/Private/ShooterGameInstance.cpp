@@ -19,6 +19,7 @@
 #include "Online/ShooterGameSession.h"
 #include "Online/ShooterOnlineSessionClient.h"
 #include "OnlineSubsystemUtils.h"
+#include "Core/PlayFabClientAPI.h"
 #include "ShooterGameUserSettings.h"
 
 #if !defined(CONTROLLER_SWAPPING)
@@ -109,21 +110,7 @@ void UShooterGameInstance::Init()
 	LocalPlayerOnlineStatus.InsertDefaulted(0, MAX_LOCAL_PLAYERS);
 
 	// game requires the ability to ID users.
-	IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-	check(OnlineSub);
-	const IOnlineIdentityPtr IdentityInterface = OnlineSub->GetIdentityInterface();
-	check(IdentityInterface.IsValid());
-
- 	const IOnlineSessionPtr SessionInterface = OnlineSub->GetSessionInterface();
- 	check(SessionInterface.IsValid());
-
-	// bind any OSS delegates we needs to handle
-	for (int i = 0; i < MAX_LOCAL_PLAYERS; ++i)
-	{
-		IdentityInterface->AddOnLoginStatusChangedDelegate_Handle(i, FOnLoginStatusChangedDelegate::CreateUObject(this, &UShooterGameInstance::HandleUserLoginChanged));
-	}
-
-	IdentityInterface->AddOnControllerPairingChangedDelegate_Handle(FOnControllerPairingChangedDelegate::CreateUObject(this, &UShooterGameInstance::HandleControllerPairingChanged));
+	PlayerPlayFabLogin();
 
 	FCoreDelegates::ApplicationWillDeactivateDelegate.AddUObject(this, &UShooterGameInstance::HandleAppWillDeactivate);
 
@@ -140,28 +127,12 @@ void UShooterGameInstance::Init()
 	FCoreUObjectDelegates::PostDemoPlay.AddUObject(this, &UShooterGameInstance::OnPostDemoPlay);
 
 	bPendingEnableSplitscreen = false;
-
-	OnlineSub->AddOnConnectionStatusChangedDelegate_Handle( FOnConnectionStatusChangedDelegate::CreateUObject( this, &UShooterGameInstance::HandleNetworkConnectionStatusChanged ) );
-
-	if (SessionInterface.IsValid())
-	{
-		SessionInterface->AddOnSessionFailureDelegate_Handle( FOnSessionFailureDelegate::CreateUObject( this, &UShooterGameInstance::HandleSessionFailure ) );
-	}
 	
 	OnEndSessionCompleteDelegate = FOnEndSessionCompleteDelegate::CreateUObject(this, &UShooterGameInstance::OnEndSessionComplete);
 
 	// Register delegate for ticker callback
 	TickDelegate = FTickerDelegate::CreateUObject(this, &UShooterGameInstance::Tick);
 	TickDelegateHandle = FTicker::GetCoreTicker().AddTicker(TickDelegate);
-
-	// Register activities delegate callback
- 	OnGameActivityActivationRequestedDelegate = FOnGameActivityActivationRequestedDelegate::CreateUObject(this, &UShooterGameInstance::OnGameActivityActivationRequestComplete);
- 	
- 	const IOnlineGameActivityPtr ActivityInterface = OnlineSub->GetGameActivityInterface();
-	if (ActivityInterface.IsValid())
-	{
-		OnGameActivityActivationRequestedDelegateHandle = ActivityInterface->AddOnGameActivityActivationRequestedDelegate_Handle(OnGameActivityActivationRequestedDelegate);
-	}
 
 	// Initialize the debug key with a set value for AES256. This is not secure and for example purposes only.
 	DebugTestEncryptionKey.SetNum(32);
@@ -971,93 +942,23 @@ TSubclassOf<UOnlineSession> UShooterGameInstance::GetOnlineSessionClass()
 
 bool UShooterGameInstance::HostQuickSession(ULocalPlayer& LocalPlayer, const FOnlineSessionSettings& SessionSettings)
 {
-	// This function is different from BeginHostingQuickMatch in that it creates a session and then starts a quick match,
-	// while BeginHostingQuickMatch assumes a session already exists
-
-	if (AShooterGameSession* const GameSession = GetGameSession())
-	{
-		// Add callback delegate for completion
-		OnCreatePresenceSessionCompleteDelegateHandle = GameSession->OnCreatePresenceSessionComplete().AddUObject(this, &UShooterGameInstance::OnCreatePresenceSessionComplete);
-
-		TravelURL = GetQuickMatchUrl();
-
-		FOnlineSessionSettings HostSettings = SessionSettings;
-
-		const FString GameType = UGameplayStatics::ParseOption(TravelURL, TEXT("game"));
-
-		// Determine the map name from the travelURL
-		const FString MapNameSubStr = "/Game/Maps/";
-		const FString ChoppedMapName = TravelURL.RightChop(MapNameSubStr.Len());
-		const FString MapName = ChoppedMapName.LeftChop(ChoppedMapName.Len() - ChoppedMapName.Find("?game"));
-
-		HostSettings.Set(SETTING_GAMEMODE, GameType, EOnlineDataAdvertisementType::ViaOnlineService);
-		HostSettings.Set(SETTING_MAPNAME, MapName, EOnlineDataAdvertisementType::ViaOnlineService);
-		HostSettings.NumPublicConnections = 16;
-
-		if (GameSession->HostSession(LocalPlayer.GetPreferredUniqueNetId().GetUniqueNetId(), NAME_GameSession, SessionSettings))
-		{
-			// If any error occurred in the above, pending state would be set
-			if (PendingState == CurrentState || PendingState == ShooterGameInstanceState::None)
-			{
-				// Go ahead and go into loading state now
-				// If we fail, the delegate will handle showing the proper messaging and move to the correct state
-				ShowLoadingScreen();
-				GotoState(ShooterGameInstanceState::Playing);
-				return true;
-			}
-		}
-	}
-
 	return false;
 }
 
-bool UShooterGameInstance::HostGame(ULocalPlayer* LocalPlayer, const FString& GameType, const FString& InTravelURL)
+bool UShooterGameInstance::HostGame(const int32 PlayersCount, const int32 BotsCount)
 {
-	if (GetOnlineMode() == EOnlineMode::Offline)
-	{
-		//
-		// Offline game, just go straight to map
-		//
-
-		ShowLoadingScreen();
-		GotoState(ShooterGameInstanceState::Playing);
-
-		// Travel to the specified match URL
-		TravelURL = InTravelURL;
-		GetWorld()->ServerTravel(TravelURL);
-		return true;
-	}
-
-	//
-	// Online game
-	//
+	CheckPlayerIsLoggedIn();
 
 	AShooterGameSession* const GameSession = GetGameSession();
-	if (GameSession)
+	if (GameSession && !SessionTicket.IsEmpty())
 	{
-		// add callback delegate for completion
-		OnCreatePresenceSessionCompleteDelegateHandle = GameSession->OnCreatePresenceSessionComplete().AddUObject(this, &UShooterGameInstance::OnCreatePresenceSessionComplete);
+		GameSession->OnCreateSessionComplete().RemoveAll(this);
+		OnCreateSessionCompleteDelegateHandle = GameSession->OnCreateSessionComplete().AddUObject(this, &UShooterGameInstance::OnCreateSessionComplete);
 
-		TravelURL = InTravelURL;
-		bool const bIsLanMatch = InTravelURL.Contains(TEXT("?bIsLanMatch"));
+		ShowLoadingScreen();
 
-		//determine the map name from the travelURL
-		const FString& MapNameSubStr = "/Game/Maps/";
-		const FString& ChoppedMapName = TravelURL.RightChop(MapNameSubStr.Len());
-		const FString& MapName = ChoppedMapName.LeftChop(ChoppedMapName.Len() - ChoppedMapName.Find("?game"));
-
-		if (GameSession->HostSession(LocalPlayer->GetPreferredUniqueNetId().GetUniqueNetId(), NAME_GameSession, GameType, MapName, bIsLanMatch, true, AShooterGameSession::DEFAULT_NUM_PLAYERS))
-		{
-			// If any error occurred in the above, pending state would be set
-			if ( (PendingState == CurrentState) || (PendingState == ShooterGameInstanceState::None) )
-			{
-				// Go ahead and go into loading state now
-				// If we fail, the delegate will handle showing the proper messaging and move to the correct state
-				ShowLoadingScreen();
-				GotoState(ShooterGameInstanceState::Playing);
-				return true;
-			}
-		}
+		GameSession->HostSession(PlayersCount, BotsCount, SessionTicket);
+		return true;
 	}
 
 	return false;
@@ -1065,52 +966,16 @@ bool UShooterGameInstance::HostGame(ULocalPlayer* LocalPlayer, const FString& Ga
 
 bool UShooterGameInstance::JoinSession(ULocalPlayer* LocalPlayer, int32 SessionIndexInSearchResults)
 {
-	// needs to tear anything down based on current state?
-
 	AShooterGameSession* const GameSession = GetGameSession();
 	if (GameSession)
 	{
+		GameSession->OnJoinSessionComplete().RemoveAll(this);
+		OnJoinSessionCompleteDelegateHandle = GameSession->OnJoinSessionComplete().AddUObject(this, &UShooterGameInstance::OnJoinSessionComplete);
+
+		ShowLoadingScreen();
 		AddNetworkFailureHandlers();
 
-		OnJoinSessionCompleteDelegateHandle = GameSession->OnJoinSessionComplete().AddUObject(this, &UShooterGameInstance::OnJoinSessionComplete);
-		if (GameSession->JoinSession(LocalPlayer->GetPreferredUniqueNetId().GetUniqueNetId(), NAME_GameSession, SessionIndexInSearchResults))
-		{
-			// If any error occured in the above, pending state would be set
-			if ( (PendingState == CurrentState) || (PendingState == ShooterGameInstanceState::None) )
-			{
-				// Go ahead and go into loading state now
-				// If we fail, the delegate will handle showing the proper messaging and move to the correct state
-				ShowLoadingScreen();
-				GotoState(ShooterGameInstanceState::Playing);
-				return true;
-			}
-		}
-	}
-
-	return false;
-}
-
-bool UShooterGameInstance::JoinSession(ULocalPlayer* LocalPlayer, const FOnlineSessionSearchResult& SearchResult)
-{
-	// needs to tear anything down based on current state?
-	AShooterGameSession* const GameSession = GetGameSession();
-	if (GameSession)
-	{
-		AddNetworkFailureHandlers();
-
-		OnJoinSessionCompleteDelegateHandle = GameSession->OnJoinSessionComplete().AddUObject(this, &UShooterGameInstance::OnJoinSessionComplete);
-		if (GameSession->JoinSession(LocalPlayer->GetPreferredUniqueNetId().GetUniqueNetId(), NAME_GameSession, SearchResult))
-		{
-			// If any error occured in the above, pending state would be set
-			if ( (PendingState == CurrentState) || (PendingState == ShooterGameInstanceState::None) )
-			{
-				// Go ahead and go into loading state now
-				// If we fail, the delegate will handle showing the proper messaging and move to the correct state
-				ShowLoadingScreen();
-				GotoState(ShooterGameInstanceState::Playing);
-				return true;
-			}
-		}
+		return GameSession->JoinSession(SessionIndexInSearchResults);
 	}
 
 	return false;
@@ -1126,30 +991,55 @@ bool UShooterGameInstance::PlayDemo(ULocalPlayer* LocalPlayer, const FString& De
 	return true;
 }
 
-/** Callback which is intended to be called upon finding sessions */
-void UShooterGameInstance::OnJoinSessionComplete(EOnJoinSessionCompleteResult::Type Result)
+void UShooterGameInstance::OnCreateSessionComplete(FString SessionAddress, bool bWasSuccessful)
 {
-	// unhook the delegate
+	UE_LOG(LogOnlineGame, Display, TEXT("OnCreateSessionComplete successful: %s"), bWasSuccessful ? TEXT("true") : TEXT("false"));
+
+	if (!bWasSuccessful)
+	{
+		FText ReturnReason = NSLOCTEXT("NetworkErrors", "CreateSessionFailed", "Failed to create a new session.");
+		FText OKButton = NSLOCTEXT("DialogButtons", "OKAY", "OK");
+		ShowMessageThenGoMain(ReturnReason, OKButton, FText::GetEmpty());
+		return;
+	}
+
+	AShooterGameSession* const GameSession = GetGameSession();
+	if (GameSession)
+	{
+		GameSession->OnCreateSessionComplete().Remove(OnCreateSessionCompleteDelegateHandle);
+
+		if (bWasSuccessful)
+		{
+			GameSession->OnJoinSessionComplete().RemoveAll(this);
+			OnJoinSessionCompleteDelegateHandle = GameSession->OnJoinSessionComplete().AddUObject(this, &UShooterGameInstance::OnJoinSessionComplete);
+			AddNetworkFailureHandlers();
+			GameSession->JoinSession(SessionAddress);
+		}
+	}
+}
+
+/** Callback which is intended to be called upon finding sessions */
+void UShooterGameInstance::OnJoinSessionComplete(bool bWasSuccessful)
+{
+	UE_LOG(LogOnlineGame, Display, TEXT("OnJoinSessionIMSComplete successful: %s"), bWasSuccessful ? TEXT("true") : TEXT("false"));
+
+	if (bWasSuccessful)
+	{
+		GotoState(ShooterGameInstanceState::Playing);
+	}
+	else
+	{
+		FText ReturnReason = NSLOCTEXT("NetworkErrors", "JoinSessionFailed", "Failed to join session.");
+		FText OKButton = NSLOCTEXT("DialogButtons", "OKAY", "OK");
+		ShowMessageThenGoMain(ReturnReason, OKButton, FText::GetEmpty());
+	}
+
+	RemoveNetworkFailureHandlers();
+
 	AShooterGameSession* const GameSession = GetGameSession();
 	if (GameSession)
 	{
 		GameSession->OnJoinSessionComplete().Remove(OnJoinSessionCompleteDelegateHandle);
-	}
-
-	// Add the splitscreen player if one exists
-	if (Result == EOnJoinSessionCompleteResult::Success && LocalPlayers.Num() > 1)
-	{
-		IOnlineSessionPtr Sessions = Online::GetSessionInterface(GetWorld());
-		if (Sessions.IsValid() && LocalPlayers[1]->GetPreferredUniqueNetId().IsValid())
-		{
-			Sessions->RegisterLocalPlayer(*LocalPlayers[1]->GetPreferredUniqueNetId(), NAME_GameSession,
-				FOnRegisterLocalPlayerCompleteDelegate::CreateUObject(this, &UShooterGameInstance::OnRegisterJoiningLocalPlayerComplete));
-		}
-	}
-	else
-	{
-		// We either failed or there is only a single local user
-		FinishJoinSession(Result);
 	}
 }
 
@@ -1233,62 +1123,40 @@ void UShooterGameInstance::InternalTravelToSession(const FName& SessionName)
 	PlayerController->ClientTravel(URL, TRAVEL_Absolute);
 }
 
-/** Callback which is intended to be called upon session creation */
-void UShooterGameInstance::OnCreatePresenceSessionComplete(FName SessionName, bool bWasSuccessful)
-{
-	AShooterGameSession* const GameSession = GetGameSession();
-	if (GameSession)
-	{
-		GameSession->OnCreatePresenceSessionComplete().Remove(OnCreatePresenceSessionCompleteDelegateHandle);
-
-		// Add the splitscreen player if one exists
-		if (bWasSuccessful && LocalPlayers.Num() > 1)
-		{
-			IOnlineSessionPtr Sessions = Online::GetSessionInterface(GetWorld());
-			if (Sessions.IsValid() && LocalPlayers[1]->GetPreferredUniqueNetId().IsValid())
-			{
-				Sessions->RegisterLocalPlayer(*LocalPlayers[1]->GetPreferredUniqueNetId(), NAME_GameSession,
-					FOnRegisterLocalPlayerCompleteDelegate::CreateUObject(this, &UShooterGameInstance::OnRegisterLocalPlayerComplete));
-			}
-		}
-		else
-		{
-			// We either failed or there is only a single local user
-			FinishSessionCreation(bWasSuccessful ? EOnJoinSessionCompleteResult::Success : EOnJoinSessionCompleteResult::UnknownError);
-		}
-	}
-}
-
 /** Initiates the session searching */
-bool UShooterGameInstance::FindSessions(ULocalPlayer* PlayerOwner, bool bIsDedicatedServer, bool bFindLAN)
+bool UShooterGameInstance::FindSessions(ULocalPlayer* PlayerOwner)
 {
-	bool bResult = false;
+	CheckPlayerIsLoggedIn();
 
-	check(PlayerOwner != nullptr);
-	if (PlayerOwner)
+	AShooterGameSession* const GameSession = GetGameSession();
+	if (GameSession && !SessionTicket.IsEmpty())
 	{
-		AShooterGameSession* const GameSession = GetGameSession();
-		if (GameSession)
-		{
-			GameSession->OnFindSessionsComplete().RemoveAll(this);
-			OnSearchSessionsCompleteDelegateHandle = GameSession->OnFindSessionsComplete().AddUObject(this, &UShooterGameInstance::OnSearchSessionsComplete);
+		GameSession->OnFindSessionsComplete().RemoveAll(this);
+		OnSearchSessionsCompleteDelegateHandle = GameSession->OnFindSessionsComplete().AddUObject(this, &UShooterGameInstance::OnSearchSessionsComplete);
 
-			GameSession->FindSessions(PlayerOwner->GetPreferredUniqueNetId().GetUniqueNetId(), NAME_GameSession, bFindLAN, !bIsDedicatedServer);
-
-			bResult = true;
-		}
+		GameSession->FindSessions(SessionTicket);
+		return true;
 	}
 
-	return bResult;
+	return false;
 }
 
 /** Callback which is intended to be called upon finding sessions */
 void UShooterGameInstance::OnSearchSessionsComplete(bool bWasSuccessful)
 {
-	AShooterGameSession* const Session = GetGameSession();
-	if (Session)
+	UE_LOG(LogOnlineGame, Display, TEXT("OnSearchSessionsComplete successful: %s"), bWasSuccessful ? TEXT("true") : TEXT("false"));
+
+	if (!bWasSuccessful)
 	{
-		Session->OnFindSessionsComplete().Remove(OnSearchSessionsCompleteDelegateHandle);
+		FText ReturnReason = NSLOCTEXT("NetworkErrors", "SearchSessionsFailed", "Could not search for sessions. Please try again.");
+		FText OKButton = NSLOCTEXT("DialogButtons", "OKAY", "OK");
+		ShowMessageThenGoMain(ReturnReason, OKButton, FText::GetEmpty());
+	}
+
+	AShooterGameSession* const GameSession = GetGameSession();
+	if (GameSession)
+	{
+		GameSession->OnFindSessionsComplete().Remove(OnSearchSessionsCompleteDelegateHandle);
 	}
 }
 
@@ -1348,42 +1216,6 @@ bool UShooterGameInstance::Tick(float DeltaSeconds)
 						FOnClicked()
 					);
 				}
-			}
-		}
-	}
-
-	// If we have a pending invite, and we are at the welcome screen, and the session is properly shut down, accept it
-	if (PendingInvite.UserId.IsValid() && PendingInvite.bPrivilegesCheckedAndAllowed && CurrentState == ShooterGameInstanceState::PendingInvite)
-	{
-		IOnlineSubsystem* OnlineSub = Online::GetSubsystem(GetWorld());
-		IOnlineSessionPtr Sessions = (OnlineSub != NULL) ? OnlineSub->GetSessionInterface() : NULL;
-
-		if (Sessions.IsValid())
-		{
-			EOnlineSessionState::Type SessionState = Sessions->GetSessionState(NAME_GameSession);
-
-			if (SessionState == EOnlineSessionState::NoSession)
-			{
-				ULocalPlayer * NewPlayerOwner = GetFirstGamePlayer();
-
-				if (NewPlayerOwner != nullptr)
-				{
-					NewPlayerOwner->SetControllerId(PendingInvite.ControllerId);
-					NewPlayerOwner->SetCachedUniqueNetId(PendingInvite.UserId);
-					SetOnlineMode(EOnlineMode::Online);
-
-					const bool bIsLocalPlayerHost = PendingInvite.UserId.IsValid() && PendingInvite.InviteResult.Session.OwningUserId.IsValid() && *PendingInvite.UserId == *PendingInvite.InviteResult.Session.OwningUserId;
-					if (bIsLocalPlayerHost)
-					{
-						HostQuickSession(*NewPlayerOwner, PendingInvite.InviteResult.Session.SessionSettings);
-					}
-					else
-					{
-						JoinSession(NewPlayerOwner, PendingInvite.InviteResult);
-					}
-				}
-
-				PendingInvite.UserId.Reset();
 			}
 		}
 	}
@@ -2048,26 +1880,6 @@ void UShooterGameInstance::DisplayOnlinePrivilegeFailureDialogs(const FUniqueNet
 	}
 }
 
-void UShooterGameInstance::OnRegisterLocalPlayerComplete(const FUniqueNetId& PlayerId, EOnJoinSessionCompleteResult::Type Result)
-{
-	FinishSessionCreation(Result);
-}
-
-void UShooterGameInstance::FinishSessionCreation(EOnJoinSessionCompleteResult::Type Result)
-{
-	if (Result == EOnJoinSessionCompleteResult::Success)
-	{
-		// Travel to the specified match URL
-		GetWorld()->ServerTravel(TravelURL);
-	}
-	else
-	{
-		FText ReturnReason = NSLOCTEXT("NetworkErrors", "CreateSessionFailed", "Failed to create session.");
-		FText OKButton = NSLOCTEXT("DialogButtons", "OKAY", "OK");
-		ShowMessageThenGoMain(ReturnReason, OKButton, FText::GetEmpty());
-	}
-}
-
 FString UShooterGameInstance::GetQuickMatchUrl()
 {
 	static const FString QuickMatchUrl(TEXT("/Game/Maps/Highrise?game=TDM?listen"));
@@ -2081,6 +1893,52 @@ void UShooterGameInstance::BeginHostingQuickMatch()
 
 	// Travel to the specified match URL
 	GetWorld()->ServerTravel(GetQuickMatchUrl());	
+}
+
+void UShooterGameInstance::PlayerPlayFabLogin()
+{
+	GetMutableDefault<UPlayFabRuntimeSettings>()->TitleId = PlayFabTitleId;
+
+	ClientAPI = IPlayFabModuleInterface::Get().GetClientAPI();
+
+	if (ClientAPI)
+	{
+		PlayFab::ClientModels::FLoginWithCustomIDRequest Request;
+		Request.CustomId = PlayFabCustomId;
+		Request.CreateAccount = true;
+
+		ClientAPI->LoginWithCustomID(Request,
+			PlayFab::UPlayFabClientAPI::FLoginWithCustomIDDelegate::CreateUObject(this, &UShooterGameInstance::PlayerPlayFabLoginOnSuccess),
+			PlayFab::FPlayFabErrorDelegate::CreateUObject(this, &UShooterGameInstance::PlayerPlayFabLoginOnError)
+		);
+	}
+}
+
+void UShooterGameInstance::PlayerPlayFabLoginOnSuccess(const PlayFab::ClientModels::FLoginResult& Result)
+{
+	UE_LOG(LogOnlineIdentity, Log, TEXT("Successfully authenticated player with PlayFab."));
+	SessionTicket = Result.SessionTicket;
+}
+
+void UShooterGameInstance::PlayerPlayFabLoginOnError(const PlayFab::FPlayFabCppError& ErrorResult)
+{
+	UE_LOG(LogOnlineIdentity, Error, TEXT("Failed to authenticate player with PlayFab."));
+
+	AShooterPlayerController_Menu* const FirstPC = Cast<AShooterPlayerController_Menu>(UGameplayStatics::GetPlayerController(GetWorld(), 0));
+	if (FirstPC != nullptr)
+	{
+		FText ReturnReason = NSLOCTEXT("NetworkErrors", "PlayFabAuthenticationFailed", "Could not authenticate you. Make sure you are connected to the internet.");
+		FText OKButton = NSLOCTEXT("DialogButtons", "OKAY", "OK");
+		ShowMessageThenGoMain(ReturnReason, OKButton, FText::GetEmpty());
+	}
+}
+
+void UShooterGameInstance::CheckPlayerIsLoggedIn()
+{
+	if (SessionTicket.IsEmpty())
+	{
+		PlayerPlayFabLogin();
+	}
 }
 
 void UShooterGameInstance::ReceivedNetworkEncryptionToken(const FString& EncryptionToken, const FOnEncryptionKeyResponse& Delegate)

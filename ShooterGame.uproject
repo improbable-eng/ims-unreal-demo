@@ -18,6 +18,11 @@
 			"Name": "IMSZeuzAPI",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "IMSSessionManagerAPI",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -97,6 +102,11 @@
 		{
 			"Name": "Reflex",
 			"Enabled": true
+		},
+		{
+			"Name": "PlayFab",
+			"Enabled": true,
+			"MarketplaceURL": "com.epicgames.launcher://ue/marketplace/content/217fdf581b784571af03d3fb6580368f"
 		}
 	],
 	"TargetPlatforms": [

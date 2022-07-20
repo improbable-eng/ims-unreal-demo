@@ -36,6 +36,9 @@ public class ShooterGame : ModuleRules
 				"AIModule",
 				"GameplayTasks",
 				"Gauntlet",
+				"PlayFab",
+				"PlayFabCpp",
+				"PlayFabCommon",
 			}
 		);
 
@@ -53,7 +56,8 @@ public class ShooterGame : ModuleRules
 				"PhysicsCore",
 				"GameplayCameras",
 				"Http",
-				"IMSZeuzAPI"
+				"IMSZeuzAPI",
+				"IMSSessionManagerAPI",
 			}
 		);
 
@@ -109,7 +113,7 @@ public class ShooterGame : ModuleRules
     {
 		get
         {
-			return 1;
+			return 0;
         }
     }
 
@@ -117,7 +121,7 @@ public class ShooterGame : ModuleRules
 	{
 		get
 		{
-			return 1;
+			return 0;
 		}
 	}
 }

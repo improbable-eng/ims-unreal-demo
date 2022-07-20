@@ -5,6 +5,7 @@
 #include "ShooterGameInstance.h"
 #include "SharedPointer.h"
 #include "OnlineSessionSettings.h"
+#include "SessionSearch.h"
 #include "ShooterTestControllerBase.generated.h"
 
 // Based on LOGIN_REQUIRED_FOR_ONLINE_PLAY in ShooterMainMenu.cpp

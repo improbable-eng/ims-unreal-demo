@@ -265,10 +265,7 @@ void UShooterTestControllerBase::HostGame()
 
 	if (PlayerOwner)
 	{
-		const FString GameType = TEXT("FFA");
-		const FString StartURL = FString::Printf(TEXT("/Game/Maps/%s?game=%s%s"), TEXT("Highrise"), *GameType, TEXT("?listen"));
-
-		GameInstance->HostGame(PlayerOwner, GameType, StartURL);
+		GameInstance->HostGame(10, 2);
 	}
 	else
 	{
@@ -382,7 +379,7 @@ void UShooterTestControllerBase::StartSearchingForGame()
 	if (UShooterGameInstance* GameInstance = GetGameInstance())
 	{
 		bIsSearchingForGame = true;
-		GameInstance->FindSessions(GameInstance->GetFirstGamePlayer(), false, false);
+		GameInstance->FindSessions(GameInstance->GetFirstGamePlayer());
 	}
 }
 
@@ -392,45 +389,28 @@ void UShooterTestControllerBase::UpdateSearchStatus()
 
 	if (ShooterSession)
 	{
-		int32 CurrentSearchIdx, NumSearchResults;
-		EOnlineAsyncTaskState::Type SearchState = ShooterSession->GetSearchResultStatus(CurrentSearchIdx, NumSearchResults);
-
-		UE_LOG(LogGauntlet, VeryVerbose, TEXT("ShooterSession->GetSearchResultStatus: %s"), EOnlineAsyncTaskState::ToString(SearchState));
+		SearchState SearchState = ShooterSession->GetSearchSessionsStatus();
 
 		switch (SearchState)
 		{
-		case EOnlineAsyncTaskState::InProgress:
+		case SearchState::InProgress:
 		{
 			break;
 		}
-		case EOnlineAsyncTaskState::Done:
+		case SearchState::Done:
 		{
-			const TArray<FOnlineSessionSearchResult> & SearchResults = ShooterSession->GetSearchResults();
-			check(SearchResults.Num() == NumSearchResults);
+			const TArray<Session>& SearchResults = ShooterSession->GetSearchResults();
 
-			if (NumSearchResults > 0)
+			if (SearchResults.Num() > 0)
 			{
 				for (int i = 0; i < SearchResults.Num(); ++i) 
 				{
-					const FOnlineSessionSearchResult& Result = SearchResults[i];
+					UShooterGameInstance* GameInstance = GetGameInstance();
+					ULocalPlayer* PlayerOwner = GameInstance ? GameInstance->GetFirstGamePlayer() : nullptr;
 
-					FString GameType;
-					FString MapName;
-
-					Result.Session.SessionSettings.Get(SETTING_GAMEMODE, GameType);
-					Result.Session.SessionSettings.Get(SETTING_MAPNAME, MapName);
-
-					if (GameType == "FFA" && MapName == "Highrise")
+					if (PlayerOwner)
 					{
-						bFoundGame = true;
-
-						UShooterGameInstance* GameInstance = GetGameInstance();
-						ULocalPlayer* PlayerOwner          = GameInstance ? GameInstance->GetFirstGamePlayer() : nullptr;
-
-						if (PlayerOwner)
-						{
-							GameInstance->JoinSession(PlayerOwner, i);
-						}
+						GameInstance->JoinSession(PlayerOwner, i);
 					}
 				}
 			}
@@ -440,8 +420,8 @@ void UShooterTestControllerBase::UpdateSearchStatus()
 			break;
 		}
 
-		case EOnlineAsyncTaskState::Failed:
-		case EOnlineAsyncTaskState::NotStarted:
+		case SearchState::Failed:
+		case SearchState::NotStarted:
 		default:
 		{
 			bIsSearchingForGame = false;

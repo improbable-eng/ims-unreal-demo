@@ -8,6 +8,9 @@
 #include "OnlineGameActivityInterface.h"
 #include "Engine/GameInstance.h"
 #include "Engine/NetworkDelegates.h"
+#include "PlayFab.h"
+#include "Core/PlayFabError.h"
+#include "Core/PlayFabClientDataModels.h"
 #include "ShooterGameInstance.generated.h"
 
 class FVariantData;
@@ -99,12 +102,14 @@ public:
 	virtual FGameInstancePIEResult StartPlayInEditorGameInstance(ULocalPlayer* LocalPlayer, const FGameInstancePIEParameters& Params) override;
 #endif	// WITH_EDITOR
 
+	/** PlayFab player authentication to get security token to pass to Session Manager */
+	void PlayerPlayFabLogin();
+
 	virtual void ReceivedNetworkEncryptionToken(const FString& EncryptionToken, const FOnEncryptionKeyResponse& Delegate) override;
 	virtual void ReceivedNetworkEncryptionAck(const FOnEncryptionKeyResponse& Delegate) override;
 
-	bool HostGame(ULocalPlayer* LocalPlayer, const FString& GameType, const FString& InTravelURL);
+	bool HostGame(const int32 PlayersCount, const int32 BotsCount);
 	bool JoinSession(ULocalPlayer* LocalPlayer, int32 SessionIndexInSearchResults);
-	bool JoinSession(ULocalPlayer* LocalPlayer, const FOnlineSessionSearchResult& SearchResult);
 	void SetPendingInvite(const FShooterPendingInvite& InPendingInvite);
 
 	bool PlayDemo(ULocalPlayer* LocalPlayer, const FString& DemoName);
@@ -119,7 +124,7 @@ public:
 	void BeginHostingQuickMatch();
 
 	/** Initiates the session searching */
-	bool FindSessions(ULocalPlayer* PlayerOwner, bool bIsDedicatedServer, bool bLANMatch);
+	bool FindSessions(ULocalPlayer* PlayerOwner);
 
 	/** Sends the game to the specified state. */
 	void GotoState(FName NewState);
@@ -216,6 +221,16 @@ private:
 	UPROPERTY(config)
 	FString MainMenuMap;
 
+	UPROPERTY(config)
+	FString PlayFabTitleId;
+
+	UPROPERTY(config)
+	FString PlayFabCustomId;
+
+
+	/** Client API for PlayFab player authentication */
+	PlayFabClientPtr ClientAPI;
+	FString SessionTicket;
 
 	FName CurrentState;
 	FName PendingState;
@@ -265,8 +280,8 @@ private:
 	FDelegateHandle OnStartSessionCompleteDelegateHandle;
 	FDelegateHandle OnEndSessionCompleteDelegateHandle;
 	FDelegateHandle OnDestroySessionCompleteDelegateHandle;
-	FDelegateHandle OnCreatePresenceSessionCompleteDelegateHandle;
 	FDelegateHandle OnGameActivityActivationRequestedDelegateHandle;
+	FDelegateHandle OnCreateSessionCompleteDelegateHandle;
 	
 	FOnGameActivityActivationRequestedDelegate OnGameActivityActivationRequestedDelegate;
 
@@ -318,22 +333,16 @@ private:
 	void TravelLocalSessionFailure(UWorld *World, ETravelFailure::Type FailureType, const FString& ErrorString);
 
 	/** Callback which is intended to be called upon joining session */
-	void OnJoinSessionComplete(EOnJoinSessionCompleteResult::Type Result);
-
-	/** Callback which is intended to be called upon session creation */
-	void OnCreatePresenceSessionComplete(FName SessionName, bool bWasSuccessful);
-
-	/** Callback which is called after adding local users to a session */
-	void OnRegisterLocalPlayerComplete(const FUniqueNetId& PlayerId, EOnJoinSessionCompleteResult::Type Result);
-
-	/** Called after all the local players are registered */
-	void FinishSessionCreation(EOnJoinSessionCompleteResult::Type Result);
+	void OnJoinSessionComplete(bool bWasSuccessful);
 
 	/** Callback which is called after adding local users to a session we're joining */
 	void OnRegisterJoiningLocalPlayerComplete(const FUniqueNetId& PlayerId, EOnJoinSessionCompleteResult::Type Result);
 
 	/** Called after all the local players are registered in a session we're joining */
 	void FinishJoinSession(EOnJoinSessionCompleteResult::Type Result);
+
+	/** Callback which is intended to be called upon IMS session creation */
+	void OnCreateSessionComplete(FString SessionAddress, bool bWasSuccessful);
 
 	/**
 	* Creates the message menu, clears other menus and sets the KingState to Message.
@@ -386,7 +395,12 @@ private:
 	void HandleControllerPairingChanged(int GameUserIndex, FControllerPairingChangedUserInfo PreviousUserInfo, FControllerPairingChangedUserInfo NewUserInfo);
 
 	// Handle confirming the controller disconnected dialog.
-	FReply OnControllerReconnectConfirm();	
+	FReply OnControllerReconnectConfirm();
+
+	/* PlayFab Authentication */
+	void PlayerPlayFabLoginOnSuccess(const PlayFab::ClientModels::FLoginResult& Result);
+	void PlayerPlayFabLoginOnError(const PlayFab::FPlayFabCppError& ErrorResult);
+	void CheckPlayerIsLoggedIn();
 
 protected:
 	bool HandleOpenCommand(const TCHAR* Cmd, FOutputDevice& Ar, UWorld* InWorld);

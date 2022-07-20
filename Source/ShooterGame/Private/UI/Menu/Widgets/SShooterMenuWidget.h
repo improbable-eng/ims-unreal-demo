@@ -359,11 +359,11 @@ namespace MenuHelper
 		MenuItem->SubMenu.Empty();
 	}
 
-	template< class UserClass >	
-	FORCEINLINE void PlaySoundAndCall(UWorld* World, const FSlateSound& Sound, int32 UserIndex, UserClass* inObj, typename FShooterMenuItem::FOnConfirmMenuItem::TSPMethodDelegate< UserClass >::FMethodPtr inMethod)
+	template< class UserClass >
+	FORCEINLINE void PlaySoundAndCall(UWorld* World, const FSlateSound& Sound, int32 UserIndex, UserClass* inObj, typename FShooterMenuItem::FOnConfirmMenuItem::TSPMethodDelegate< UserClass >::FMethodPtr inMethod, bool WaitForSoundToFinish = true)
 	{
 		FSlateApplication::Get().PlaySound(Sound, UserIndex);
-		if (World)
+		if (World && WaitForSoundToFinish)
 		{
 			const float SoundDuration = FMath::Max(FSlateApplication::Get().GetSoundDuration(Sound), 0.1f);
 			FTimerHandle DummyHandle;

@@ -5,18 +5,17 @@
 #include "SlateBasics.h"
 #include "SlateExtras.h"
 #include "ShooterGame.h"
+#include "SessionSearch.h"
 #include "SShooterMenuWidget.h"
 
 class AShooterGameSession;
 
 struct FServerEntry
 {
-	FString ServerName;
-	FString CurrentPlayers;
-	FString MaxPlayers;
-	FString GameType;
+	FString SessionAddress;
+	FString GamePhase;
+	FString PlayerCount;
 	FString MapName;
-	FString Ping;
 	int32 SearchResultsIndex;
 };
 
@@ -67,7 +66,7 @@ public:
 	void UpdateSearchStatus();
 
 	/** Starts searching for servers */
-	void BeginServerSearch(bool bLANMatch, bool bIsDedicatedServer, const FString& InMapFilterName);
+	void BeginServerSearch();
 
 	/** Called when server search is finished */
 	void OnServerSearchFinished();
@@ -91,12 +90,6 @@ public:
 	void Tick( const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime );
 
 protected:
-
-	/** Whether last searched for LAN (so spacebar works) */
-	bool bLANMatchSearch;
-
-	/** Whether last searched for Dedicated Server (so spacebar works) */
-	bool bDedicatedServer;
 
 	/** Whether we're searching for servers */
 	bool bSearchingForServers;
@@ -133,6 +126,23 @@ protected:
 
 	/** pointer to our parent widget */
 	TSharedPtr<class SWidget> OwnerWidget;
+
+	inline const FString StateToString(SearchState State)
+	{
+		switch (State)
+		{
+		case NotStarted:
+			return TEXT("NotStarted");
+		case InProgress:
+			return TEXT("InProgress");
+		case Done:
+			return TEXT("Done");
+		case Failed:
+			return TEXT("Failed");
+		default:
+			return TEXT("Unknown");
+		}
+	}
 };
 
 

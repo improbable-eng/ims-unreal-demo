@@ -18,7 +18,8 @@ void UShooterPersistentUser::SetToDefaults()
 	bInvertedYAxis = false;
 	AimSensitivity = 1.0f;
 	Gamma = 2.2f;
-	BotsCount = 1;
+	PlayersCount = AShooterGameMode::DEFAULT_NUMBER_PLAYERS;
+	BotsCount = AShooterGameMode::DEFAULT_NUMBER_BOTS;
 	bIsRecordingDemos = false;
 }
 
@@ -234,6 +235,13 @@ void UShooterPersistentUser::SetGamma(float InGamma)
 	bIsDirty |= Gamma != InGamma;
 
 	Gamma = InGamma;
+}
+
+void UShooterPersistentUser::SetPlayersCount(int32 InCount)
+{
+	bIsDirty |= PlayersCount != InCount;
+
+	PlayersCount = InCount;
 }
 
 void UShooterPersistentUser::SetBotsCount(int32 InCount)

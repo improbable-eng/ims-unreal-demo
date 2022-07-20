@@ -16,7 +16,6 @@ void SShooterServerList::Construct(const FArguments& InArgs)
 	OwnerWidget = InArgs._OwnerWidget;
 	MapFilterName = "Any";
 	bSearchingForServers = false;
-	bLANMatchSearch = false;
 	StatusText = FText::GetEmpty();
 	BoxWidth = 125;
 	LastSearchTime = 0.0f;
@@ -36,7 +35,7 @@ void SShooterServerList::Construct(const FArguments& InArgs)
 		.AutoHeight()
 		[
 			SNew(SBox)  
-			.WidthOverride(600)
+			.WidthOverride(800)
 			.HeightOverride(300)
 			[
 				SAssignNew(ServerListWidget, SListView<TSharedPtr<FServerEntry>>)
@@ -48,11 +47,10 @@ void SShooterServerList::Construct(const FArguments& InArgs)
 				.OnMouseButtonDoubleClick(this,&SShooterServerList::OnListItemDoubleClicked)
 				.HeaderRow(
 					SNew(SHeaderRow)
-					+ SHeaderRow::Column("ServerName").FixedWidth(BoxWidth*2) .DefaultLabel(NSLOCTEXT("ServerList", "ServerNameColumn", "Server Name"))
-					+ SHeaderRow::Column("GameType") .DefaultLabel(NSLOCTEXT("ServerList", "GameTypeColumn", "Game Type"))
-					+ SHeaderRow::Column("Map").DefaultLabel(NSLOCTEXT("ServerList", "MapNameColumn", "Map"))
-					+ SHeaderRow::Column("Players") .DefaultLabel(NSLOCTEXT("ServerList", "PlayersColumn", "Players"))
-					+ SHeaderRow::Column("Ping") .DefaultLabel(NSLOCTEXT("ServerList", "NetworkPingColumn", "Ping")))
+					+ SHeaderRow::Column("Address").FixedWidth(BoxWidth * 2).DefaultLabel(NSLOCTEXT("Address", "AddressColumn", "Address"))
+					+ SHeaderRow::Column("GamePhase").DefaultLabel(NSLOCTEXT("GamePhase", "GamePhaseColumn", "Game Phase"))
+					+ SHeaderRow::Column("MapName").DefaultLabel(NSLOCTEXT("MapName", "MapNameColumn", "Map Name"))
+					+ SHeaderRow::Column("PlayerCount").DefaultLabel(NSLOCTEXT("PlayerCount", "PlayerCountColumn", "Player Count")))
 			]
 		]
 		+SVerticalBox::Slot()
@@ -92,76 +90,47 @@ void SShooterServerList::UpdateSearchStatus()
 	AShooterGameSession* ShooterSession = GetGameSession();
 	if (ShooterSession)
 	{
-		int32 CurrentSearchIdx, NumSearchResults;
-		EOnlineAsyncTaskState::Type SearchState = ShooterSession->GetSearchResultStatus(CurrentSearchIdx, NumSearchResults);
+		SearchState SearchState = ShooterSession->GetSearchSessionsStatus();
 
-		UE_LOG(LogOnlineGame, Log, TEXT("ShooterSession->GetSearchResultStatus: %s"), EOnlineAsyncTaskState::ToString(SearchState) );
+		UE_LOG(LogOnlineGame, Log, TEXT("ShooterSession->GetSearchResultStatus: %s"), *StateToString(SearchState));
 
 		switch(SearchState)
 		{
-			case EOnlineAsyncTaskState::InProgress:
+			case SearchState::InProgress:
 				StatusText = LOCTEXT("Searching","SEARCHING...");
 				bFinishSearch = false;
 				break;
 
-			case EOnlineAsyncTaskState::Done:
-				// copy the results
+			case SearchState::Done:
 				{
 					ServerList.Empty();
-					const TArray<FOnlineSessionSearchResult> & SearchResults = ShooterSession->GetSearchResults();
-					check(SearchResults.Num() == NumSearchResults);
-					if (NumSearchResults == 0)
+					const TArray<Session>& SearchResults = ShooterSession->GetSearchResults();
+
+					if (SearchResults.Num() == 0)
 					{
-#if PLATFORM_PS4
-						StatusText = LOCTEXT("NoServersFound","NO SERVERS FOUND, PRESS SQUARE TO TRY AGAIN");
-#elif SHOOTER_XBOX_STRINGS
-						StatusText = LOCTEXT("NoServersFound","NO SERVERS FOUND, PRESS X TO TRY AGAIN");
-#elif PLATFORM_SWITCH
-						StatusText = LOCTEXT("NoServersFound", "NO SERVERS FOUND, PRESS <img src=\"ShooterGame.Switch.Left\"/> TO TRY AGAIN");
-#else
-						StatusText = LOCTEXT("NoServersFound","NO SERVERS FOUND, PRESS SPACE TO TRY AGAIN");
-#endif
-					}
-					else
-					{
-#if PLATFORM_PS4
-						StatusText = LOCTEXT("ServersRefresh","PRESS SQUARE TO REFRESH SERVER LIST");
-#elif SHOOTER_XBOX_STRINGS
-						StatusText = LOCTEXT("ServersRefresh","PRESS X TO REFRESH SERVER LIST");
-#elif PLATFORM_SWITCH
-						StatusText = LOCTEXT("ServersRefresh", "PRESS <img src=\"ShooterGame.Switch.Left\"/> TO REFRESH SERVER LIST");
-#else
-						StatusText = LOCTEXT("ServersRefresh","PRESS SPACE TO REFRESH SERVER LIST");
-#endif
+						StatusText = LOCTEXT("ServersRefresh", "PRESS SPACE TO REFRESH SERVER LIST");
 					}
 
-					for (int32 IdxResult = 0; IdxResult < NumSearchResults; ++IdxResult)
+					for (int32 IdxResult = 0; IdxResult < SearchResults.Num(); ++IdxResult)
 					{
 						TSharedPtr<FServerEntry> NewServerEntry = MakeShareable(new FServerEntry());
 
-						const FOnlineSessionSearchResult& Result = SearchResults[IdxResult];
+						const Session& Result = SearchResults[IdxResult];
 
-						NewServerEntry->ServerName = Result.Session.OwningUserName;
-						NewServerEntry->Ping = FString::FromInt(Result.PingInMs);
-						NewServerEntry->CurrentPlayers = FString::FromInt(Result.Session.SessionSettings.NumPublicConnections 
-							+ Result.Session.SessionSettings.NumPrivateConnections 
-							- Result.Session.NumOpenPublicConnections 
-							- Result.Session.NumOpenPrivateConnections);
-						NewServerEntry->MaxPlayers = FString::FromInt(Result.Session.SessionSettings.NumPublicConnections
-							+ Result.Session.SessionSettings.NumPrivateConnections);
+						NewServerEntry->GamePhase = Result.GetGamePhase();
+						NewServerEntry->SessionAddress = Result.GetSessionAddress();
+						NewServerEntry->PlayerCount = Result.GetPlayerCount();
+						NewServerEntry->MapName = Result.GetMapName();
 						NewServerEntry->SearchResultsIndex = IdxResult;
-					
-						Result.Session.SessionSettings.Get(SETTING_GAMEMODE, NewServerEntry->GameType);
-						Result.Session.SessionSettings.Get(SETTING_MAPNAME, NewServerEntry->MapName);
 
 						ServerList.Add(NewServerEntry);
 					}
 				}
 				break;
 
-			case EOnlineAsyncTaskState::Failed:
+			case SearchState::Failed:
 				// intended fall-through
-			case EOnlineAsyncTaskState::NotStarted:
+			case SearchState::NotStarted:
 				StatusText = FText::GetEmpty();
 				// intended fall-through
 			default:
@@ -198,18 +167,15 @@ void SShooterServerList::Tick( const FGeometry& AllottedGeometry, const double I
 }
 
 /** Starts searching for servers */
-void SShooterServerList::BeginServerSearch(bool bLANMatch, bool bIsDedicatedServer, const FString& InMapFilterName)
+void SShooterServerList::BeginServerSearch()
 {
 	double CurrentTime = FApp::GetCurrentTime();
-	if (!bLANMatch && CurrentTime - LastSearchTime < MinTimeBetweenSearches)
+	if (CurrentTime - LastSearchTime < MinTimeBetweenSearches)
 	{
 		OnServerSearchFinished();
 	}
 	else
 	{
-		bLANMatchSearch = bLANMatch;
-		bDedicatedServer = bIsDedicatedServer;
-		MapFilterName = InMapFilterName;
 		bSearchingForServers = true;
 		ServerList.Empty();
 		LastSearchTime = CurrentTime;
@@ -217,7 +183,7 @@ void SShooterServerList::BeginServerSearch(bool bLANMatch, bool bIsDedicatedServ
 		UShooterGameInstance* const GI = Cast<UShooterGameInstance>(PlayerOwner->GetGameInstance());
 		if (GI)
 		{
-			GI->FindSessions(PlayerOwner.Get(), bIsDedicatedServer, bLANMatchSearch);
+			GI->FindSessions(PlayerOwner.Get());
 		}
 	}
 }
@@ -232,20 +198,6 @@ void SShooterServerList::OnServerSearchFinished()
 
 void SShooterServerList::UpdateServerList()
 {
-	/** Only filter maps if a specific map is specified */
-	if (MapFilterName != "Any")
-	{
-		for (int32 i = 0; i < ServerList.Num(); ++i)
-		{
-			/** Only filter maps if a specific map is specified */
-			if (ServerList[i]->MapName != MapFilterName)
-			{
-				ServerList.RemoveAt(i);
-				i--;
-			}
-		}
-	}
-
 	int32 SelectedItemIndex = ServerList.IndexOfByKey(SelectedItem);
 
 	ServerListWidget->RequestListRefresh();
@@ -264,12 +216,7 @@ void SShooterServerList::ConnectToServer()
 		// unsafe
 		return;
 	}
-#if WITH_EDITOR
-	if (GIsEditor == true)
-	{
-		return;
-	}
-#endif
+
 	if (SelectedItem.IsValid())
 	{
 		int ServerToJoin = SelectedItem->SearchResultsIndex;
@@ -351,7 +298,7 @@ FReply SShooterServerList::OnKeyDown(const FGeometry& MyGeometry, const FKeyEven
 	//hit space bar to search for servers again / refresh the list, only when not searching already
 	else if (Key == EKeys::SpaceBar || Key == EKeys::Gamepad_FaceButton_Left)
 	{
-		BeginServerSearch(bLANMatchSearch, bDedicatedServer, MapFilterName);
+		BeginServerSearch();
 	}
 	return Result;
 }
@@ -373,26 +320,23 @@ TSharedRef<ITableRow> SShooterServerList::MakeListViewWidget(TSharedPtr<FServerE
 		TSharedRef<SWidget> GenerateWidgetForColumn(const FName& ColumnName)
 		{
 			FText ItemText = FText::GetEmpty();
-			if (ColumnName == "ServerName")
+
+			if (ColumnName == "Address")
 			{
-				ItemText = FText::FromString(Item->ServerName + "'s Server");
+				ItemText = FText::FromString(Item->SessionAddress);
 			}
-			else if (ColumnName == "GameType")
+			else if (ColumnName == "GamePhase")
 			{
-				ItemText = FText::FromString(Item->GameType);
+				ItemText = FText::FromString(Item->GamePhase);
 			}
-			else if (ColumnName == "Map")
+			else if (ColumnName == "MapName")
 			{
 				ItemText = FText::FromString(Item->MapName);
 			}
-			else if (ColumnName == "Players")
+			else if (ColumnName == "PlayerCount")
 			{
-				ItemText = FText::Format( FText::FromString("{0}/{1}"), FText::FromString(Item->CurrentPlayers), FText::FromString(Item->MaxPlayers) );
+				ItemText = FText::FromString(Item->PlayerCount);
 			}
-			else if (ColumnName == "Ping")
-			{
-				ItemText = FText::FromString(Item->Ping);
-			} 
 			return SNew(STextBlock)
 				.Text(ItemText)
 				.TextStyle(FShooterStyle::Get(), "ShooterGame.MenuServerListTextStyle");

@@ -9,6 +9,7 @@
 #include "Online/ShooterPlayerState.h"
 #include "Online/ShooterGameSession.h"
 #include "Bots/ShooterAIController.h"
+#include "Math/UnrealMathUtility.h"
 #include "ShooterTeamStart.h"
 
 
@@ -32,6 +33,9 @@ AShooterGameMode::AShooterGameMode(const FObjectInitializer& ObjectInitializer) 
 	bAllowBots = true;	
 	bNeedsBotCreation = true;
 	bUseSeamlessTravel = FParse::Param(FCommandLine::Get(), TEXT("NoSeamlessTravel")) ? false : true;
+
+	MaxNumPlayers = DEFAULT_NUMBER_PLAYERS;
+	MaxNumBots = DEFAULT_NUMBER_BOTS;
 
 	RetryLimitCount = 10;
 	RetryTimeoutRelativeSeconds = 5;
@@ -58,21 +62,18 @@ FString AShooterGameMode::GetBotsCountOptionName()
 
 void AShooterGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
-	const int32 BotsCountOptionValue = UGameplayStatics::GetIntOption(Options, GetBotsCountOptionName(), 0);
-	SetAllowBots(BotsCountOptionValue > 0 ? true : false, BotsCountOptionValue);	
+	SetAllowBots(DEFAULT_NUMBER_BOTS > 0 ? true : false, DEFAULT_NUMBER_BOTS);
 	Super::InitGame(MapName, Options, ErrorMessage);
 
-	const UGameInstance* GameInstance = GetGameInstance();
-	if (GameInstance && Cast<UShooterGameInstance>(GameInstance)->GetOnlineMode() != EOnlineMode::Offline)
-	{
-		bPauseable = false;
-	}
+	bPauseable = false;
 }
 
 void AShooterGameMode::SetAllowBots(bool bInAllowBots, int32 InMaxBots)
 {
 	bAllowBots = bInAllowBots;
-	MaxBots = InMaxBots;
+	MaxNumBots = FMath::Clamp(InMaxBots, MIN_NUMBER_BOTS, MAX_NUMBER_BOTS);
+
+	UE_LOG(LogGameMode, Display, TEXT("SetAllowBots: bAllowBots = %s, MaxNumBots = %d"), bAllowBots ? TEXT("true") : TEXT("false"), MaxNumBots);
 }
 
 /** Returns game session class to use */
@@ -86,11 +87,24 @@ bool AShooterGameMode::IsRunningOnZeuz()
 	return FParse::Param(FCommandLine::Get(), TEXT("zeuz"));
 }
 
+bool AShooterGameMode::WasCreatedBySessionManager()
+{
+	return FParse::Param(FCommandLine::Get(), TEXT("session-manager"));
+}
+
 void AShooterGameMode::SetupPayloadLocalAPI()
 {
+	CurrentPayloadState = IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unknown;
+	TimeOfLastPayloadStateChange = 0;
+
 	RetryPolicy = IMSZeuzAPI::HttpRetryParams(RetryLimitCount, RetryTimeoutRelativeSeconds);
 	PayloadLocalAPI = MakeShared<IMSZeuzAPI::OpenAPIPayloadLocalApi>();
+	SessionManagerLocalAPI = MakeShared<IMSZeuzAPI::OpenAPISessionManagerLocalApi>();
+	
 	OnSetPayloadToReadyDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate::CreateUObject(this, &AShooterGameMode::OnSetPayloadToReadyComplete);
+	OnUpdatePayloadStatusDelegate = IMSZeuzAPI::OpenAPIPayloadLocalApi::FGetPayloadV0Delegate::CreateUObject(this, &AShooterGameMode::OnUpdatePayloadStatusComplete);
+	OnRetrieveSessionConfigDelegate = IMSZeuzAPI::OpenAPISessionManagerLocalApi::FGetSessionConfigV0Delegate::CreateUObject(this, &AShooterGameMode::OnRetrieveSessionConfigComplete);
+	OnSetSessionStatusDelegate = IMSZeuzAPI::OpenAPISessionManagerLocalApi::FApiV0SessionManagerStatusPostDelegate::CreateUObject(this, &AShooterGameMode::OnSetSessionStatusComplete);
 
 	FString payloadApiDomain = FPlatformMisc::GetEnvironmentVariable(*FString("ORCHESTRATION_PAYLOAD_API"));
 
@@ -98,6 +112,7 @@ void AShooterGameMode::SetupPayloadLocalAPI()
 	{
 		FString payloadApiUrl = "http://" + payloadApiDomain;
 		PayloadLocalAPI->SetURL(payloadApiUrl);
+		SessionManagerLocalAPI->SetURL(payloadApiUrl);
 
 		UE_LOG(LogGameMode, Display, TEXT("Payload Local API URL was set to '%s'"), *payloadApiUrl);
 	}
@@ -127,11 +142,22 @@ void AShooterGameMode::DefaultTimer()
 		return;
 	}
 
+	UpdatePayloadStatus();
+
 	AShooterGameState* const MyGameState = Cast<AShooterGameState>(GameState);
 	if (MyGameState && MyGameState->RemainingTime > 0 && !MyGameState->bTimerPaused)
 	{
 		if (GetMatchState() == MatchState::WaitingToStart && GetNumPlayers() == 0)
 		{
+			if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Reserved)
+			{
+				if (UGameplayStatics::GetRealTimeSeconds(GetWorld()) - TimeOfLastPayloadStateChange > TimeBeforeReservedPayloadTimeout)
+				{
+					// Shutdown server to avoid filling allocation buffer with reserved payloads that are not being used
+					FGenericPlatformMisc::RequestExit(false);
+				}
+			}
+			
 			return;
 		}
 
@@ -219,6 +245,40 @@ void AShooterGameMode::TrySetPayloadToReady()
 	FHttpModule::Get().GetHttpManager().Flush(false);
 }
 
+void AShooterGameMode::UpdatePayloadStatus()
+{
+	IMSZeuzAPI::OpenAPIPayloadLocalApi::GetPayloadV0Request Request;
+	Request.SetShouldRetry(RetryPolicy);
+
+	PayloadLocalAPI->GetPayloadV0(Request, OnUpdatePayloadStatusDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
+}
+
+void AShooterGameMode::RetrieveSessionConfig()
+{
+	IMSZeuzAPI::OpenAPISessionManagerLocalApi::GetSessionConfigV0Request Request;
+	Request.SetShouldRetry(RetryPolicy);
+
+	UE_LOG(LogGameMode, Display, TEXT("Attempting to retrieve session config..."));
+	SessionManagerLocalAPI->GetSessionConfigV0(Request, OnRetrieveSessionConfigDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
+}
+
+void AShooterGameMode::SetSessionStatus()
+{
+	IMSZeuzAPI::OpenAPISessionManagerLocalApi::ApiV0SessionManagerStatusPostRequest Request;
+	Request.SetShouldRetry(RetryPolicy);
+
+	Request.RequestBody = CreateSessionStatusBody();
+
+	UE_LOG(LogGameMode, Display, TEXT("Attempting to set session status..."));
+	SessionManagerLocalAPI->ApiV0SessionManagerStatusPost(Request, OnSetSessionStatusDelegate);
+
+	FHttpModule::Get().GetHttpManager().Flush(false);
+}
+
 void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response)
 {
 	if (Response.IsSuccessful())
@@ -230,6 +290,114 @@ void AShooterGameMode::OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayl
 		UE_LOG(LogGameMode, Display, TEXT("Failed to set Payload to Ready state."));
 		FGenericPlatformMisc::RequestExit(false); // Shutdown server
 	}
+}
+
+void AShooterGameMode::OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::GetPayloadV0Response& Response)
+{
+	if (Response.IsSuccessful())
+	{
+		IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values PendingState = Response.Content.Result.Status.State.Value;
+		if (CurrentPayloadState != PendingState)
+		{
+			CurrentPayloadState = PendingState;
+			TimeOfLastPayloadStateChange = UGameplayStatics::GetRealTimeSeconds(GetWorld());
+
+			if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Reserved && WasCreatedBySessionManager())
+			{
+				UE_LOG(LogGameMode, Display, TEXT("Updated payload status to reserved."));
+
+				RetrieveSessionConfig();
+			}
+			else if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Error || CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unhealthy)
+			{
+				UE_LOG(LogGameMode, Error, TEXT("Payload status is error/unhealthy"));
+				// Handle appropriately
+			}
+		}
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Failed to retrieve payload details."));
+	}
+}
+
+void AShooterGameMode::OnRetrieveSessionConfigComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::GetSessionConfigV0Response& Response)
+{
+	if (Response.IsSuccessful())
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Successfully retrieved session config."));
+
+		if (Response.Content.Config.IsSet())
+		{
+			// Process Json response and apply config to game server
+			ProcessSessionConfig(Response.Content.Config.GetValue());
+		}
+		else
+		{
+			UE_LOG(LogGameMode, Display, TEXT("No session config found to apply to game server."));
+		}
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Failed to retrieve session config."));
+	}
+}
+
+void AShooterGameMode::OnSetSessionStatusComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::ApiV0SessionManagerStatusPostResponse& Response)
+{
+	if (Response.IsSuccessful())
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Successfully set session status."));
+	}
+	else
+	{
+		UE_LOG(LogGameMode, Display, TEXT("Failed to set session status."));
+	}
+}
+
+void AShooterGameMode::ProcessSessionConfig(FString SessionConfig)
+{
+	UE_LOG(LogGameMode, Display, TEXT("Processing SessionConfig: %s"), *SessionConfig);
+
+	TSharedPtr<FJsonObject> JsonObject = MakeShareable(new FJsonObject);
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(SessionConfig);
+
+	if (!FJsonSerializer::Deserialize(Reader, JsonObject))
+	{
+		// The deserialization failed, handle this case
+		UE_LOG(LogGameMode, Display, TEXT("Failed to deserialize Json from Session Config."));
+	}
+	else
+	{
+		int32 MaxNumPlayersFromJson;
+		int32 BotsCountFromJson;
+
+		if (JsonObject->TryGetNumberField("MaxNumPlayers", MaxNumPlayersFromJson))
+		{
+			MaxNumPlayers = FMath::Clamp(MaxNumPlayersFromJson, MIN_NUMBER_PLAYERS, MAX_NUMBER_PLAYERS);
+		}
+
+		if (JsonObject->TryGetNumberField("BotsCount", BotsCountFromJson))
+		{
+			SetAllowBots(BotsCountFromJson > 0 ? true : false, BotsCountFromJson);
+			CreateBotControllers();
+			bNeedsBotCreation = false;
+		}
+
+		SetSessionStatus();
+	}
+}
+
+TMap<FString, FString> AShooterGameMode::CreateSessionStatusBody()
+{
+	TMap<FString, FString> Body;
+
+	Body.Add("GamePhase", GetMatchState().ToString());
+	Body.Add("MapName", GetWorld()->GetMapName());
+	Body.Add("CurrentNumPlayers", FString::FromInt(GetNumPlayers()));
+	Body.Add("MaxNumPlayers", FString::FromInt(MaxNumPlayers));
+
+	return Body;
 }
 
 void AShooterGameMode::ExitPlayersToMainMenu()
@@ -349,11 +517,27 @@ bool AShooterGameMode::IsWinner(class AShooterPlayerState* PlayerState) const
 
 void AShooterGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
 {
+	if (CurrentPayloadState != IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Reserved)
+	{
+		// You may want to handle this case, but could result in race condition between 
+		//  the game server detecting the payload is reserved and a player trying to connect
+	}
+
 	AShooterGameState* const MyGameState = Cast<AShooterGameState>(GameState);
 	const bool bMatchIsOver = MyGameState && MyGameState->HasMatchEnded();
 	if( bMatchIsOver )
 	{
 		ErrorMessage = TEXT("Match is over!");
+	}
+	else if (GetNumPlayers() >= MaxNumPlayers)
+	{
+		ErrorMessage = TEXT("Player capacity is full!");
+	}
+	else if (CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Shutdown
+		|| CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Unhealthy
+		|| CurrentPayloadState == IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values::Error)
+	{
+		ErrorMessage = TEXT("This server cannot be joined.");
 	}
 	else
 	{
@@ -380,6 +564,25 @@ void AShooterGameMode::PostLogin(APlayerController* NewPlayer)
 		NewPC->ClientGameStarted();
 		NewPC->ClientStartOnlineGame();
 	}
+
+	// Update Session Status so that player count reflects that a new player has joined
+	SetSessionStatus();
+}
+
+void AShooterGameMode::Logout(AController* Exiting)
+{
+	Super::Logout(Exiting);
+
+	// Update Session Status so that player count reflects that a player has left the game
+	SetSessionStatus();
+}
+
+void AShooterGameMode::SetMatchState(FName NewState)
+{
+	Super::SetMatchState(NewState);
+
+	// Update Session Status so that the match state is updated
+	SetSessionStatus();
 }
 
 void AShooterGameMode::Killed(AController* Killer, AController* KilledPlayer, APawn* KilledPawn, const UDamageType* DamageType)
@@ -588,7 +791,7 @@ void AShooterGameMode::CreateBotControllers()
 
 	// Create any necessary AIControllers.  Hold off on Pawn creation until pawns are actually necessary or need recreating.	
 	int32 BotNum = ExistingBots;
-	for (int32 i = 0; i < MaxBots - ExistingBots; ++i)
+	for (int32 i = 0; i < MaxNumBots - ExistingBots; ++i)
 	{
 		CreateBot(BotNum + i);
 	}

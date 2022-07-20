@@ -4,10 +4,13 @@
 
 #include "OnlineIdentityInterface.h"
 #include "ShooterPlayerController.h"
+#include "Json.h"
 #include "HttpModule.h"
 #include "HttpManager.h"
 #include "OpenAPIPayloadLocalApi.h"
 #include "OpenAPIPayloadLocalApiOperations.h"
+#include "OpenAPISessionManagerLocalApi.h"
+#include "OpenAPISessionManagerLocalApiOperations.h"
 #include "ShooterGameMode.generated.h"
 
 class AShooterAIController;
@@ -37,6 +40,12 @@ class AShooterGameMode : public AGameMode
 
 	/** starts match warmup */
 	virtual void PostLogin(APlayerController* NewPlayer) override;
+
+	/** Called when a Controller with a PlayerState leaves the game or is destroyed */
+	virtual void Logout(AController* Exiting) override;
+
+	/** Updates the match state and calls the appropriate transition functions */
+	virtual void SetMatchState(FName NewState);
 
 	/** Tries to spawn the player's pawn */
 	virtual void RestartPlayer(AController* NewPlayer) override;
@@ -110,14 +119,14 @@ protected:
 	UPROPERTY(config)
 	float DamageSelfScale;
 
-	UPROPERTY(config)
-	int32 MaxBots;
-
 	UPROPERTY()
 	TArray<AShooterAIController*> BotControllers;
 
 	UPROPERTY(config)
 	TSubclassOf<AShooterPlayerController> PlatformPlayerControllerClass;
+
+	UPROPERTY(config)
+	int32 TimeBeforeReservedPayloadTimeout;
 	
 	/** Handle for efficient management of DefaultTimer timer */
 	FTimerHandle TimerHandle_DefaultTimer;
@@ -150,21 +159,54 @@ protected:
 	/* Check for -zeuz flag to know that the server is running in IMS zeuz */
 	bool IsRunningOnZeuz();
 
+	/* Check for -session-manager flag to know that the session was created by IMS Session Manager */
+	bool WasCreatedBySessionManager();
+
+	/* IMS Payload State */
+	IMSZeuzAPI::OpenAPIPayloadStatusStateV0::Values CurrentPayloadState;
+	float TimeOfLastPayloadStateChange;
+
 	/* Setup Payload local API */
 	void SetupPayloadLocalAPI();
+
+	/* Called after retrieving Session Config */
+	void ProcessSessionConfig(FString SessionConfig);
+
+	/* Session Config parameters */
+	int32 MaxNumPlayers;
+	int32 MaxNumBots;
+
+	/* Create session status body for set session status request */
+	TMap<FString, FString> CreateSessionStatusBody();
 
 	/* Retry policy and configuration */
 	int RetryLimitCount;
 	int RetryTimeoutRelativeSeconds;
 	IMSZeuzAPI::HttpRetryParams RetryPolicy;
 
-	/* IMS Payload Local APIs */
+	/* IMS Zeuz APIs */
 	TSharedPtr<IMSZeuzAPI::OpenAPIPayloadLocalApi> PayloadLocalAPI;
+	TSharedPtr<IMSZeuzAPI::OpenAPISessionManagerLocalApi> SessionManagerLocalAPI;
 
 	/* Set the Payload to Ready when the GameServer is ready to accept connections */
 	IMSZeuzAPI::OpenAPIPayloadLocalApi::FReadyV0Delegate OnSetPayloadToReadyDelegate;
 	void OnSetPayloadToReadyComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::ReadyV0Response& Response);
 	void TrySetPayloadToReady();
+
+	/* Retrieve details of the current payload, including metadata and status */
+	IMSZeuzAPI::OpenAPIPayloadLocalApi::FGetPayloadV0Delegate OnUpdatePayloadStatusDelegate;
+	void OnUpdatePayloadStatusComplete(const IMSZeuzAPI::OpenAPIPayloadLocalApi::GetPayloadV0Response& Response);
+	void UpdatePayloadStatus();
+
+	/* Retrieve the Session Config that was set by the Game Client when creating the session */
+	IMSZeuzAPI::OpenAPISessionManagerLocalApi::FGetSessionConfigV0Delegate OnRetrieveSessionConfigDelegate;
+	void OnRetrieveSessionConfigComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::GetSessionConfigV0Response& Response);
+	void RetrieveSessionConfig();
+
+	/* Set the Session Status */
+	IMSZeuzAPI::OpenAPISessionManagerLocalApi::FApiV0SessionManagerStatusPostDelegate OnSetSessionStatusDelegate;
+	void OnSetSessionStatusComplete(const IMSZeuzAPI::OpenAPISessionManagerLocalApi::ApiV0SessionManagerStatusPostResponse& Response);
+	void SetSessionStatus();
 
 	/** Send all clients back to the main menu */
 	void ExitPlayersToMainMenu();
@@ -185,4 +227,11 @@ public:
 	UPROPERTY()
 	TArray<AShooterPickup*> LevelPickups;
 
+	static const int32 MIN_NUMBER_BOTS = 0;
+	static const int32 MAX_NUMBER_BOTS = 4;
+	static const int32 DEFAULT_NUMBER_BOTS = 0;
+
+	static const int32 MIN_NUMBER_PLAYERS = 2;
+	static const int32 MAX_NUMBER_PLAYERS = 10;
+	static const int32 DEFAULT_NUMBER_PLAYERS = 6;
 };
