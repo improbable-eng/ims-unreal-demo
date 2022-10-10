@@ -3,7 +3,6 @@
 This demo game was adapted from the Unreal Engine [ShooterGame](https://docs.unrealengine.com/4.27/en-US/Resources/SampleGames/ShooterGame/) and is built in UE 4.27. The goal is to demonstrate:
 1. How to support [IMS zeuz](https://docs.ims.improbable.io/docs/ims-zeuz/getting-started) orchestration in your game.
 2. How to integrate [IMS Session Manager](https://docs.ims.improbable.io/docs/ims-session-manager/getting-started) functionality into your game.
-2. How to integrate [IMS Matchmaking](https://docs.ims.improbable.io/docs/matchmaker/getting-started) functionality into your game. (*coming soon*)
 
 
 ## Table of Contents
